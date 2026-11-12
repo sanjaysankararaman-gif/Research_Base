@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      rel="stylesheet">
+</head>
+<body>
+  <body>
+
+    <!-- 1. Navigation Bar -->
+    <header>
+        <nav>
+            <h2>Research Paper searcher</h2>
+
+            <ul>
+                <li><a href="#">Home</a></li>
+                <li><a href="#inventory">My Library</a></li>
+                <li><a href="#about">About</a></li>
+            </ul>
+        </nav>
+    </header>
+
+
+    <main>
+
+        <!-- 2. Hero Section -->
+        <section id="hero">
+            <h1>Manage Your Research Papers</h1>
+            <p>Organise, access and manage academic publications.</p>
+        </section>
+
+
+        <!-- 3. DOI Search Section -->
+        <section id="doi-search">
+            <h2>Find a Research Paper</h2>
+
+            <form>
+                <label for="doi">Enter Paper DOI:</label>
+                <input type="text" id="doi" name="doi"
+                    placeholder="Enter DOI here">
+
+                <button type="submit">Search Paper</button>
+            </form>
+        </section>
+
+
+        <!-- 4. Statistics Section (Papers stored) -->
+        <section id="statistics">
+            <h2>Papers Stored:</h2>
+
+            <p>Total Papers: <span>0</span></p>
+            <p>Journals: <span>0</span></p>
+            <p>Conferences: <span>0</span></p>
+        </section>
+
+
+        <!--Inventory Section -->
+        <section id="inventory">
+            <h2>My inventory</h2>
+            <input type="text" placeholder="Search your library">
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>DOI</th>
+                        <th>Paper Title</th>
+                        <th>Authors</th>
+                        <th>Year</th>
+                        <th>Publication Type</th>
+                        
+                    </tr>
+                </thead>
+
+                <tbody>
+                    <!-- Paper records-->
+                </tbody>
+            </table>
+        </section>
+
+
+        <!-- 6. About Section -->
+        <section id="about">
+            <h2>About PaperScope</h2>
+            <p>....</p>
+        </section>
+
+    </main>
+
+
+    <!-- 7. Footer -->
+    <footer>
+        <p>&copy; 2026. All rights reserved.</p>
+    </footer>
+
+
+    <!-- Bootstrap and JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/home.js"></script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>My Library |Researchbase</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+    <!--Navigation Bar -->
+    <header>
+        <nav>
+            <a href="index.html">Research base</a>
+
+            <ul>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="inventory.html">My Library</a></li>
+                <li><a href="index.html#about">About</a></li>
+            </ul>
+        </nav>
+    </header>
+
+
+    <main class="container">
+
+        <!-- Inventory Heading -->
+        <section id="inventory-header">
+            <h1>My Library</h1>
+            <p>Manage your saved research papers</p>
+        </section>
+
+
+        <!-- Search and Filter Section -->
+        <section id="inventory-search">
+            <h2>Find a Paper</h2>
+            <input
+                type="text"
+                id="search-input"
+                placeholder="Search by title, author or DOI">
+
+            <button type="button" id="search-button">Search</button>
+
+            <!-- Filters -->
+            <div id="filters">
+
+                <label for="publication-filter">
+                    Publication Type:
+                </label>
+
+                <select id="publication-filter">
+                    <option value="">All Types</option>
+                    <option value="Journal">Journal</option>
+                    <option value="Conference">Conference</option>
+                </select>
+            </div>
+        </section>
+
+
+        <!-- Research Paper Table -->
+        <section id="inventory-table">
+            <h2>Saved Publications</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>S.No.</th>
+                        <th>Paper Title</th>
+                        <th>Authors</th>
+                        <th>Year</th>
+                        <th>Publication Type</th>
+                        <th>DOI</th>
+                        <th>View</th>
+                    </tr>
+                </thead>
+
+                <tbody id="paper-list">
+
+                    <!-- Sample record-->
+                    <tr>
+                        <td>1</td>
+                        <td>Example Research Paper</td>
+                        <td>abc</td>
+                        <td>2026</td>
+                        <td>Journal</td>
+                        <td>10.1234/eg</td>
+                        <td>
+                            <a href="details.html?paperId=101">
+                                View
+                            </a>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+        </section>
+
+
+        <!-- Back to home -->
+        <section id="page-navigation">
+            <a href="index.html">Back to Home</a>
+        </section>
+
+    </main>
+
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 Research base. All rights reserved.</p>
+    </footer>
+
+
+    <!-- Bootstrap JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Inventory JavaScript -->
+    <script src="js/inventory.js"></script>
+
+</body>
+</html>

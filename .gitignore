@@ -5,3 +5,33 @@ __pycache__/
 *.pyc
 .DS_Store
 EOF
+# --- added for the Python backend ---
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+credentials*.json
+token*.json
+client_secret*.json
+service_account*.json
+
+# Local data
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+logs/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

@@ -9,11 +9,14 @@ Cell conventions:
     "Not available"   the field applies to this paper, but no source had it
     "-"               the field does not apply (e.g. conference fields for a journal paper)
 
-File location: EXCEL_PATH in .env (default data/research_papers.xlsx).
-Download it from the app ("Download Excel") or GET /api/excel.
+Download it from the app ("Download Excel") or GET /api/excel: the file is
+built from the database at that moment, so it is always complete, also on
+Vercel. Locally a copy is also kept at EXCEL_PATH (default
+data/research_papers.xlsx); on Vercel no file is written.
 """
 from __future__ import annotations
 
+import io
 import logging
 import os
 import tempfile
@@ -74,7 +77,7 @@ WIDTHS = {"Publication Title": 50, "Author Names": 40, "Publication URL": 40, "I
           "Notes": 60, "Published Version DOI": 26}
 
 
-def excel_path() -> Path:
+def excel_path() -> Path | None:
     return settings.excel_path
 
 
@@ -98,9 +101,8 @@ def build_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     return rows
 
 
-def write_workbook(path: Path | None = None) -> Path:
-    """Rebuild the Excel file from every paper in the library."""
-    path = Path(path or excel_path())
+def build_workbook() -> Workbook:
+    """A workbook with every paper in the library."""
     records = db.all_papers()
     wb = Workbook()
     ws = wb.active
@@ -125,7 +127,20 @@ def write_workbook(path: Path | None = None) -> Path:
                 cell.font = Font(color="1F4E8C", underline="single")
     ws.freeze_panes = "C2"
     ws.auto_filter.ref = ws.dimensions
+    return wb
 
+
+def workbook_bytes() -> bytes:
+    """The Excel file as bytes, for downloads."""
+    buffer = io.BytesIO()
+    build_workbook().save(buffer)
+    return buffer.getvalue()
+
+
+def write_workbook(path: Path | None = None) -> Path:
+    """Rebuild the Excel file on disk from every paper in the library."""
+    path = Path(path or excel_path())
+    wb = build_workbook()
     path.parent.mkdir(parents=True, exist_ok=True)
     with _lock:
         # Write to a temp file, then swap it in, so the file is never half-written.
@@ -137,12 +152,14 @@ def write_workbook(path: Path | None = None) -> Path:
         finally:
             if os.path.exists(tmp):
                 os.remove(tmp)
-    log.info("Excel updated: %s (%d papers)", path, len(records))
+    log.info("Excel updated: %s (%d papers)", path, wb.active.max_row - 1)
     return path
 
 
 def safe_update() -> bool:
-    """Rebuild the workbook; never let an Excel problem break a lookup."""
+    """Rebuild the file copy (if one is configured); never let Excel break a lookup."""
+    if excel_path() is None:
+        return True   # no file copy (e.g. on Vercel): downloads are built on demand
     try:
         write_workbook()
         return True

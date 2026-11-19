@@ -1,7 +1,8 @@
 # Research_Base (`backend` branch)
 
-> This branch = the `scraping` branch (data retrieval) + the backend: API, database, Excel
-> file, and the connected pages in `UI/`.
+> This branch = the `scraping` branch (data retrieval) + the backend: API, storage and Excel.
+> The pages (`UI/`) are on the `frontend` branch. After the branches are merged into `main`,
+> `UI/` sits next to `backend/` and the backend serves it.
 
 Enter a paper's DOI → the app fetches the fields from
 *Essential Fields for Research Publication Database* → the paper is saved to
@@ -27,6 +28,54 @@ instead of adding a duplicate.
 
 The pages are the team's frontend (`UI/`), connected to the backend. Developer details
 for the API are in **[API.md](API.md)**.
+
+## Merging the branches into `main`
+
+```bash
+git checkout main && git pull
+```
+```bash
+git merge origin/backend
+```
+```bash
+git merge origin/scraping
+```
+```bash
+git merge -X no-renames origin/frontend
+```
+
+Why `-X no-renames`: an earlier commit on `main` renamed `UI/` to `templates/`. Without the
+option, git puts the new pages into `templates/`. With it, one conflict remains:
+`UI/details.html` ("deleted in HEAD and modified in frontend"). Keep the frontend version:
+
+```bash
+git add UI/details.html && git commit --no-edit
+```
+
+## Deploying on Vercel
+
+1. vercel.com → **Add New… → Project** → import `Research_Base` (branch `main`). Vercel
+   detects FastAPI. `pyproject.toml` tells it to run `backend/main.py`, so the older root
+   `main.py` is not used.
+2. Optional environment variables: `CONTACT_EMAIL`, `SEMANTIC_SCHOLAR_API_KEY`.
+3. Deploy. Check `https://<your-app>.vercel.app/api/health`.
+
+**The library is temporary for now.** Without a database, Vercel keeps saved papers only until
+it restarts the app, which happens often. Lookups and the Excel download work, but the library
+can reset.
+
+**To make it permanent later (Supabase):** Supabase project → **Connect** → copy the **Session
+pooler** connection string → in Vercel, project → Settings → Environment Variables → add
+`DATABASE_URL` with that value → Redeploy. The tables are created automatically; no code
+changes are needed. `/api/health` then shows `"storage": "postgres (permanent)"`.
+
+Notes:
+- **Quartiles:** come from `reference/scimagojr_2025.csv`, which is in the repository.
+- **Excel download:** built from the database on every click, so it always has every saved paper.
+- **Bulk lookups (`/api/extract`):** run in the background and are meant for local use; the pages use
+  single lookups, which work on Vercel.
+- **Running locally without the frontend merged:** set `FRONTEND_DIR` in `.env` to the `UI`
+  folder of a checkout of the `frontend` branch.
 
 ## Preprint DOIs (arXiv etc.)
 
@@ -135,7 +184,9 @@ curl -X POST http://127.0.0.1:8000/api/papers -H "Content-Type: application/json
 | `WOS_API_KEY` | Field 8: Web of Science indexing check (Clarivate WoS Starter API). |
 | `SJR_CSV_PATH` | Field 14: path to the SCImago journal ranking CSV (free download from scimagojr.com → "Download data"). |
 | `IMPACT_FACTOR_CSV_PATH` | Field 15: CSV with columns `issn,impact_factor[,year]` exported from JCR (licensed). |
-| `EXCEL_PATH` | Where the Excel file is saved (default `data/research_papers.xlsx`). |
+| `DATABASE_URL` | Hosted Postgres (e.g. Supabase) to keep the library permanently. Not set: SQLite file `data/research_data.db` (on Vercel: temporary, in `/tmp`). |
+| `EXCEL_PATH` | Where a copy of the Excel file is kept locally (default `data/research_papers.xlsx`; not used on Vercel). |
+| `FRONTEND_DIR` | Folder with the pages (default `UI`). |
 | `CORS_ORIGINS` | Origins allowed to call the API (default `*` for local development). |
 
 API keys stay on the server. They are never sent to the browser. `.env`, the database and logs are git-ignored.

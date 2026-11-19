@@ -209,9 +209,32 @@ def test_excel_file_is_written_and_kept_in_sync(client):
     assert r.status_code == 200 and "spreadsheetml" in r.headers["content-type"]
 
 
-def test_frontend_pages_are_served(client):
-    for page in ("/", "/inventory.html", "/details.html", "/js/common.js", "/css/style.css"):
-        assert client.get(page).status_code == 200, page
+def test_root_without_or_with_frontend(client):
+    """The pages come from the frontend branch; without UI/ the root explains that."""
+    from backend.config import settings
+
+    r = client.get("/")
+    assert r.status_code == 200
+    if settings.frontend_dir.is_dir():
+        for page in ("/inventory.html", "/details.html"):
+            assert client.get(page).status_code == 200, page
+    else:
+        assert "frontend branch" in r.json()["message"]
+
+
+def test_excel_download_built_from_database(client):
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    client.post("/api/papers", json={"doi": DOI})
+    r = client.get("/api/excel")
+    rows = list(load_workbook(BytesIO(r.content)).active.iter_rows(values_only=True))
+    assert len(rows) == 2 and rows[1][6] == DOI       # header + one paper; column 7 = DOI
+
+
+def test_health_reports_storage(client):
+    h = client.get("/api/health").json()
+    assert h["storage_is_permanent"] is True and h["storage"]
 
 
 def test_bulk_job_never_left_running(client, monkeypatch):

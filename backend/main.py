@@ -22,7 +22,7 @@ from logging.handlers import RotatingFileHandler
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import database as db
@@ -37,17 +37,23 @@ from .services import SOURCE_LABELS, build_clients
 
 
 def configure_logging() -> None:
-    settings.log_dir.mkdir(parents=True, exist_ok=True)
+    """Log to the console (shown in Vercel's logs) and, locally, to logs/researchbase.log."""
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     root = logging.getLogger("extractor")
     root.setLevel(settings.log_level)
-    if not root.handlers:
-        fh = RotatingFileHandler(settings.log_dir / "researchbase.log", maxBytes=2_000_000, backupCount=3)
-        fh.setFormatter(fmt)
-        sh = logging.StreamHandler()
-        sh.setFormatter(fmt)
-        root.addHandler(fh)
-        root.addHandler(sh)
+    if root.handlers:
+        return
+    sh = logging.StreamHandler()
+    sh.setFormatter(fmt)
+    root.addHandler(sh)
+    if settings.log_dir is not None:
+        try:
+            settings.log_dir.mkdir(parents=True, exist_ok=True)
+            fh = RotatingFileHandler(settings.log_dir / "researchbase.log", maxBytes=2_000_000, backupCount=3)
+            fh.setFormatter(fmt)
+            root.addHandler(fh)
+        except OSError:
+            root.warning("Cannot write log files to %s; logging to the console only", settings.log_dir)
 
 
 log = logging.getLogger("extractor.api")
@@ -62,7 +68,9 @@ async def lifespan(app: FastAPI):
     if interrupted:
         log.warning("Marked %d unfinished job item(s) from a previous run as failed", interrupted)
     app.state.clients = build_clients()
-    log.info("Started %s %s (db=%s)", settings.app_name, settings.version, settings.database_path)
+    log.info("Started %s %s (storage: %s)", settings.app_name, settings.version, db.storage_description())
+    if settings.on_vercel and not db.using_postgres():
+        log.warning("No DATABASE_URL: the library is stored in /tmp and will reset when Vercel restarts the app")
     yield
     for task in list(_background):
         task.cancel()
@@ -118,12 +126,13 @@ async def health():
         else "not configured (IMPACT_FACTOR_CSV_PATH)",
         "google_scholar": "not available (no permitted integration)",
     }
-    sources["excel_file"] = str(excel_export.excel_path())
     ok = db_state == "ok"
     return JSONResponse(
         status_code=200 if ok else 503,
         content={"status": "ok" if ok else "degraded", "version": settings.version,
-                 "database": db_state, "sources": sources},
+                 "database": db_state, "storage": db.storage_description(),
+                 "storage_is_permanent": db.using_postgres() or not settings.on_vercel,
+                 "frontend": settings.frontend_dir.is_dir(), "sources": sources},
     )
 
 
@@ -223,13 +232,12 @@ async def delete_paper(paper_id: int):
 
 @api.get("/excel")
 async def download_excel():
-    """Download the Excel file with every paper in the library."""
-    path = excel_export.excel_path()
-    if not path.is_file():
-        excel_export.write_workbook()
-    return FileResponse(
-        path, filename="research_papers.xlsx",
+    """Download an Excel file with every paper in the library (built from the database now)."""
+    return Response(
+        content=excel_export.workbook_bytes(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="research_papers.xlsx"',
+                 "Cache-Control": "no-store"},
     )
 
 
@@ -312,5 +320,12 @@ async def stats():
 app.include_router(api)
 
 # ------------------------------------------------------------------ frontend (UI/ from the frontend branch)
+# The pages live on the frontend branch. After the branches are merged, UI/ sits next to
+# backend/ and is served here (on Vercel, from its CDN). Without it, only the API runs.
 if settings.frontend_dir.is_dir():
     app.mount("/", StaticFiles(directory=settings.frontend_dir, html=True), name="ui")
+else:
+    @app.get("/", include_in_schema=False)
+    async def no_frontend():
+        return JSONResponse({"message": "Research Base API is running. The pages (UI/) come from the "
+                                        "frontend branch; API docs: /docs"})

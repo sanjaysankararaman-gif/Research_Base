@@ -1,10 +1,14 @@
-"""SQLite persistence layer.
+"""Persistence layer: SQLite locally, PostgreSQL when DATABASE_URL is set.
 
 All SQL lives in this module so the rest of the application never touches the
-database directly. Migrating to PostgreSQL means re-implementing the functions
-below (same names and return shapes) — nothing else has to change. The schema
-uses only portable column types (TEXT / INTEGER / REAL) and ISO-8601 UTC
-timestamps stored as TEXT.
+database directly. The same SQL runs on both databases: the schema uses only
+portable column types (TEXT / INTEGER / REAL), ISO-8601 UTC timestamps stored
+as TEXT, and `?` placeholders that are translated for PostgreSQL.
+
+* Local development: a SQLite file (DATABASE_PATH, default data/research_data.db).
+* Hosted Postgres (e.g. Supabase): set DATABASE_URL to its connection string.
+  Without it, on Vercel the SQLite file lives in /tmp, so the library resets
+  whenever Vercel restarts the app.
 
 Tables
 ------
@@ -20,11 +24,14 @@ job_items       per-DOI progress within a job
 from __future__ import annotations
 
 import json
+import logging
+import re
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .config import settings
 from .timeutil import utc_now
@@ -108,23 +115,51 @@ CREATE INDEX IF NOT EXISTS idx_papers_updated ON papers(updated_at);
 CREATE INDEX IF NOT EXISTS idx_job_items_doi ON job_items(doi);
 """
 
+# PostgreSQL version of the schema: identical except for the auto-increment id.
+PG_SCHEMA = SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+
+log = logging.getLogger("extractor.database")
+
 _lock = threading.Lock()
 _db_path: Path | None = None
+_initialized = False
+
+
+def using_postgres() -> bool:
+    return bool(settings.database_url)
+
+
+def storage_description() -> str:
+    if using_postgres():
+        return "postgres (permanent)"
+    if settings.on_vercel:
+        return "sqlite in /tmp (TEMPORARY: resets when Vercel restarts the app; set DATABASE_URL)"
+    return f"sqlite ({_db_path or settings.database_path})"
 
 
 def init_db(path: Path | None = None) -> None:
-    """Create the database file and schema. Safe to call repeatedly."""
-    global _db_path
+    """Create the schema. Safe to call repeatedly."""
+    global _db_path, _initialized
+    if using_postgres() and path is None:
+        _initialized = True
+        with connect() as conn:
+            conn.executescript(PG_SCHEMA)
+        return
     _db_path = Path(path or settings.database_path)
     _db_path.parent.mkdir(parents=True, exist_ok=True)
+    _initialized = True
     with connect() as conn:
         conn.executescript(SCHEMA)
 
 
 @contextmanager
-def connect() -> Iterator[sqlite3.Connection]:
-    if _db_path is None:
+def connect():
+    if not _initialized:
         init_db()
+    if using_postgres() and _db_path is None:
+        with _pg_connect() as conn:
+            yield conn
+        return
     conn = sqlite3.connect(_db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -138,6 +173,107 @@ def connect() -> Iterator[sqlite3.Connection]:
         raise
     finally:
         conn.close()
+
+
+# --------------------------------------------------------------------------- PostgreSQL
+
+class _PgRow(tuple):
+    """Row usable like sqlite3.Row: row[0], row["column"], dict(row)."""
+
+    def __new__(cls, values, names):
+        row = super().__new__(cls, values)
+        row._names = names
+        return row
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return tuple.__getitem__(self, self._names.index(key))
+        return tuple.__getitem__(self, key)
+
+    def keys(self):
+        return list(self._names)
+
+
+def _row_factory(cursor):
+    names = [c.name for c in cursor.description] if cursor.description else []
+    return lambda values: _PgRow(values, names)
+
+
+_PLACEHOLDER = re.compile(r"\?")
+
+
+class _PgConnection:
+    """Wraps a psycopg connection with the small part of the sqlite3 API used here."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql: str, params=()):
+        cur = self._conn.cursor(row_factory=_row_factory)
+        cur.execute(_PLACEHOLDER.sub("%s", sql), tuple(params) if params else None)
+        return cur
+
+    def executemany(self, sql: str, seq):
+        cur = self._conn.cursor()
+        cur.executemany(_PLACEHOLDER.sub("%s", sql), [tuple(p) for p in seq])
+        return cur
+
+    def executescript(self, script: str):
+        # Drop "-- comments" first: they may contain ";".
+        script = "\n".join(line.split("--", 1)[0] for line in script.splitlines())
+        for statement in (s.strip() for s in script.split(";")):
+            if statement:
+                self._conn.execute(statement)
+
+
+_pg_conn = None
+_pg_last_used = 0.0
+
+
+def _pg_open():
+    import psycopg  # only needed when DATABASE_URL is set
+
+    # prepare_threshold=None: no server-side prepared statements, which connection
+    # poolers (e.g. Supabase's pooler on port 6543) do not support.
+    return psycopg.connect(settings.database_url, connect_timeout=15, prepare_threshold=None)
+
+
+@contextmanager
+def _pg_connect():
+    """One connection per process, reused across requests and re-opened if it dropped.
+
+    Hosted Postgres (e.g. Supabase) closes idle connections, so a connection unused for
+    a while is checked before use.
+    """
+    global _pg_conn, _pg_last_used
+    with _lock:
+        if _pg_conn is not None and (_pg_conn.closed or _pg_conn.broken):
+            _pg_conn = None
+        if _pg_conn is not None and time.monotonic() - _pg_last_used > 60:
+            try:
+                _pg_conn.execute("SELECT 1")
+                _pg_conn.commit()
+            except Exception:
+                log.info("Postgres connection was closed by the server; reconnecting")
+                try:
+                    _pg_conn.close()
+                except Exception:
+                    pass
+                _pg_conn = None
+        if _pg_conn is None:
+            _pg_conn = _pg_open()
+        conn = _pg_conn
+        try:
+            yield _PgConnection(conn)
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                _pg_conn = None
+            raise
+        finally:
+            _pg_last_used = time.monotonic()
 
 
 def _dumps(value: Any) -> str:
@@ -472,7 +608,13 @@ def get_job(job_id: str) -> dict[str, Any] | None:
 
 
 def mark_interrupted_jobs() -> int:
-    """On startup, close out jobs left running by a previous process."""
+    """On startup, close out jobs left running by a previous process.
+
+    Only for a local single-process setup: with a shared Postgres database, other
+    live instances may be running jobs right now.
+    """
+    if using_postgres():
+        return 0
     with connect() as conn:
         cur = conn.execute(
             "UPDATE job_items SET status = 'failed', message = 'Interrupted: server restarted', "

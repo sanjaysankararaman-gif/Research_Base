@@ -1,33 +1,57 @@
 const searchInput = document.getElementById("search-input");
 const searchButton = document.getElementById("search-button");
-const publicationFilter = document.getElementById("publication-filter");//the typr of publication
-const paperList = document.getElementById("paper-list");//Table body containing research papers
+const publicationFilter = document.getElementById("publication-filter"); // the type of publication
+const paperList = document.getElementById("paper-list");                 // table body containing research papers
+const paperCount = document.getElementById("paper-count");
 
-function filterPapers() 
-    {
-    const searchValue = searchInput.value.toLowerCase();//entered value in the search bar
-    const selectedType = publicationFilter.value;//selected publication type from the dropdown
-    const rows = paperList.getElementsByTagName("tr");//all the rows in the table body
+function shorten(text, max) {
+    if (!text) return "";
+    return text.length > max ? text.slice(0, max) + "…" : text;
+}
 
-    for (let i = 0; i < rows.length; i++) {
+function showRows(papers) {
+    if (papers.length === 0) {
+        const filtered = searchInput.value.trim() || publicationFilter.value;
+        paperList.innerHTML = '<tr><td colspan="7" class="text-center text-secondary py-4">' +
+            (filtered ? "No papers match your search." : 'No papers yet. <a href="index.html">Add one with a DOI</a>.') +
+            "</td></tr>";
+        return;
+    }
+    paperList.innerHTML = papers.map(function (paper, index) {
+        return "<tr>" +
+            "<td>" + (index + 1) + "</td>" +
+            "<td>" + escapeHtml(paper.title || "Untitled") + "</td>" +
+            "<td>" + escapeHtml(shorten(paper.authors_text, 80)) + "</td>" +
+            "<td>" + escapeHtml(paper.publication_year || "") + "</td>" +
+            "<td>" + escapeHtml(paper.publication_type || "") + "</td>" +
+            '<td class="doi-cell">' + escapeHtml(paper.doi) + "</td>" +
+            '<td><a class="btn btn-sm btn-outline-primary" href="details.html?paperId=' + paper.id + '">View</a></td>' +
+            "</tr>";
+    }).join("");
+}
 
-        const row = rows[i];
+async function loadPapers() {
+    const query = new URLSearchParams({ page_size: "200", sort: "id", order: "asc" });
+    const searchValue = searchInput.value.trim();     // entered value in the search bar
+    const selectedType = publicationFilter.value;     // selected publication type from the dropdown
+    if (searchValue) query.set("search", searchValue);
+    if (selectedType) query.set("type", selectedType);
 
-        const paperDetails = row.textContent.toLowerCase();
-        const publicationType = row.cells[4].textContent; //retrieving the publication type
-
-        //boolean values
-        const matchesSearch = paperDetails.includes(searchValue);//checking if the entered value is present anywhere in the row
-        const matchesFilter = selectedType === "" || publicationType === selectedType; //checking if the selected publication type matches the publication type of the row
-
-        if (matchesSearch && matchesFilter) {
-            row.style.display = "";
-        } else {
-            row.style.display = "none";
-        }
+    try {
+        const data = await apiFetch("/api/papers?" + query.toString());
+        showRows(data.items);
+        paperCount.textContent = data.total === 1 ? "1 paper" : data.total + " papers";
+    } catch (error) {
+        paperList.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">' +
+            escapeHtml(error.message) + "</td></tr>";
+        paperCount.textContent = "";
     }
 }
 
-//main
-searchButton.addEventListener("click", filterPapers);
-publicationFilter.addEventListener("change", filterPapers);
+// main
+searchButton.addEventListener("click", loadPapers);
+publicationFilter.addEventListener("change", loadPapers);
+searchInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") loadPapers();
+});
+loadPapers();

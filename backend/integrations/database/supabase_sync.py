@@ -112,7 +112,7 @@ def publication_from_record(record: dict[str, Any]) -> Publication:
             "issue": _text(fields["issue"]),
             "page_range": _text(fields["page_range"]),
             "quartile": fields["quartile"] if fields["quartile"] in QUARTILES else None,
-            "impact_factor": fields["impact_factor"],
+            "impact_factor": fields["impact_factor"] if (fields["impact_factor"] or 0) < 1000 else None
         }
         return Publication(**base, journal=journal)
 

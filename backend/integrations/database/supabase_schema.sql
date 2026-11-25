@@ -39,16 +39,7 @@ create table if not exists conference_details (
   proceedings_pages     text
 );
 
--- Home-institution faculty. Each professor gets a UID (uuid) that is generated
--- once and never changes.
-create table if not exists faculty (
-  faculty_uid uuid primary key default gen_random_uuid(),
-  full_name   text not null unique,
-  created_at  timestamptz not null default now()
-);
-
--- Other spellings of a professor's name as it may appear in author lists,
--- e.g. 'E. Professor One'. The full name is always matched as well.
+-- Home-institution faculty. Each professor gets a UID that is generated once and never changes.
 create table if not exists faculty (
   faculty_uid uuid primary key default gen_random_uuid(),
   full_name   text not null unique,      -- display name, e.g. 'K.S. Gayathri'
@@ -57,15 +48,24 @@ create table if not exists faculty (
   created_at  timestamptz not null default now()
 );
 
--- If faculty already exists, run these instead of the create above, then fill in the values:
-alter table faculty add column if not exists given_names text;
-alter table faculty add column if not exists family_name text;
-
+-- Spellings the matching rules cannot reach. The full name is always matched as well.
 create table if not exists faculty_name_variants (
   faculty_uid  uuid not null references faculty(faculty_uid) on delete cascade,
   name_variant text not null,
   primary key (faculty_uid, name_variant)
 );
+
+-- Which home-institution professors wrote which publication.
+create table if not exists publication_faculty (
+  publication_id  bigint not null references publications(id) on delete cascade,
+  faculty_uid     uuid   not null references faculty(faculty_uid) on delete cascade,
+  matched_author  text   not null,       -- the author string as it appeared
+  author_position int,                   -- 1 = first author
+  primary key (publication_id, faculty_uid)
+);
+
+create index if not exists idx_publication_faculty_faculty
+  on publication_faculty(faculty_uid);
 
 -- Names are hard-coded here. Re-running is safe.
 insert into faculty (full_name, given_names, family_name) values
@@ -80,12 +80,14 @@ on conflict (full_name) do update
     set given_names = excluded.given_names,
         family_name = excluded.family_name;
 
--- Add a variant only for a spelling the rules cannot reach, for example
--- insert into faculty_name_variants select faculty_uid, 'Suganya Eswaran' from faculty where full_name = 'Suganya E';
+-- Add a variant only for a spelling the rules cannot reach, for example:
+-- insert into faculty_name_variants select faculty_uid, 'Suganya Eswaran'
+--   from faculty where full_name = 'Suganya E';
 
-
-
-create or replace view home_institution_publications as
+-- Use the view for reports. security_invoker makes it respect the caller's
+-- permissions, so the locked-down tables cannot be read through it.
+create or replace view home_institution_publications
+with (security_invoker = true) as
 select p.*,
        array_agg(f.full_name order by pf.author_position) as faculty_names
 from publications p
@@ -93,8 +95,8 @@ join publication_faculty pf on pf.publication_id = p.id
 join faculty f on f.faculty_uid = pf.faculty_uid
 group by p.id;
 
-
-
+-- Lock the tables against the public API. The connector uses the database role,
+-- which is not affected by these policies.
 alter table publications          enable row level security;
 alter table journal_details       enable row level security;
 alter table conference_details    enable row level security;

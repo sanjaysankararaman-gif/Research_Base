@@ -14,6 +14,7 @@ from .. import database as db
 from ..config import settings
 from ..services import OK, SourceClient, SourceResult
 from .retrieval import retrieve
+from ..integrations.database.supabase_sync import sync_to_supabase
 
 log = logging.getLogger("extractor.pipeline")
 

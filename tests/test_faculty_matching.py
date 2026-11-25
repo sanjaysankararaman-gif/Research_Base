@@ -1,6 +1,6 @@
 import pytest
 
-from backend.integrations.supabase_db import FacultyMember, match_faculty
+from backend.integrations.database.supabase_db import FacultyMember, match_faculty
 
 MEMBERS = [
     FacultyMember("sree", "Sreehari Veeramachaneni", ("sreehari",), "veeramachaneni", frozenset()),

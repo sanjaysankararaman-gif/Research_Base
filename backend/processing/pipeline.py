@@ -42,6 +42,7 @@ async def extract_doi(
     # total outage, must not create an empty entry or overwrite good stored data.
     if record["status"] in ("complete", "partial"):
         record["id"] = db.save_paper(record)
+        await asyncio.to_thread(sync_to_supabase, record)
     else:
         existing = db.get_paper(doi)
         record["id"] = existing["id"] if existing else None

@@ -41,7 +41,8 @@ def test_crossref_parsing():
     assert r.status == OK
     assert r.data["title"] == "A Test Paper"
     assert r.data["authors"] == ["Ada Lovelace", "Alan Turing"]
-    assert r.data["author_affiliations"] == {"Ada Lovelace": ["Analytical College"]}
+    assert r.data["authorships"] == [{"name": "Ada Lovelace", "institutions": ["Analytical College"], "ror": []},
+                                     {"name": "Alan Turing", "institutions": [], "ror": []}]
     assert r.data["publication_date"] == "2020-05-17"
     assert r.data["journal"] == "Journal of Tests"
     assert r.data["abstract"] == "An abstract ."
@@ -114,14 +115,6 @@ def test_404_is_not_found_and_not_retried():
 
     assert run(go()).status == NOT_FOUND
     assert t.calls["api.crossref.org"] == 1
-
-
-def test_google_scholar_is_reported_unavailable_not_faked():
-    t = make_transport([])
-    r = run(fetch_all(t))["google_scholar"]
-    assert r.status == UNAVAILABLE
-    assert r.data == {}
-    assert "Google Scholar" in r.message
 
 
 def test_merge_partial_success_keeps_sources_separate():
@@ -240,6 +233,11 @@ def test_journal_ranking_files(tmp_path, monkeypatch):
         f = jr.lookup_impact_factor(["1234-5678"])
         assert f.status == OK and f.data["impact_factor"] == 0.0     # a real 0, not unavailable
         assert jr.lookup_quartile(["0000-0000"]).status == NOT_FOUND
+        # No ISSN in any source: exact title match, never a partial one.
+        t = jr.lookup_quartile([], ["The Journal of Tests"])
+        assert t.status == OK and t.data["quartile"] == "Q2" and "exact journal title" in t.message
+        assert jr.lookup_quartile([], ["Journal of Tests and More"]).status == NOT_FOUND
+        assert jr.lookup_quartile(["0000-0000"], ["Journal of Tests"]).status == NOT_FOUND  # ISSN wins
     finally:
         object.__setattr__(settings, "sjr_csv_path", None)
         object.__setattr__(settings, "impact_factor_csv_path", None)
@@ -286,3 +284,126 @@ def test_helpers():
     assert strip_jats("<jats:title>Abstract</jats:title><jats:p>Hello <b>x</b></jats:p>") == "Hello x"
     assert reconstruct_abstract({"world": [1], "Hello": [0]}) == "Hello world"
     assert reconstruct_abstract(None) is None
+
+
+def test_publication_date_completed_only_when_sources_agree():
+    from backend.services import SourceResult
+
+    def results(cr_date, oa_date):
+        return {"crossref": SourceResult("crossref", OK, data={"title": "T", "publication_date": cr_date}),
+                "openalex": SourceResult("openalex", OK, data={"title": "T", "publication_date": oa_date})}
+
+    date = lambda r: merge_sources(DOI, r)["metrics"]["publication_date"]["preferred"]
+    assert date(results("2015-05", "2015-05-28"))["value"] == "2015-05-28"       # same year and month
+    assert date(results("2015-05", "2015-05-28"))["source"] == "openalex"
+    assert date(results("2015-05", "2015-06-01"))["value"] == "2015-05"          # disagrees: keep Crossref
+    assert date(results("2024-11", "2024-11-01"))["value"] == "2024-11"          # "01" = day not known
+    assert date(results("2015-05-27", "2015-05-28"))["value"] == "2015-05-27"    # Crossref full date wins
+
+
+def test_retries_stop_at_the_time_budget():
+    """A source that keeps answering 429 must not hold a lookup past SOURCE_TIME_BUDGET_SECONDS."""
+    import time as _time
+    from backend.config import settings
+
+    t = make_transport([("api.crossref.org", lambda request, n: httpx.Response(429, headers={"Retry-After": "2"}))])
+    saved = settings.source_time_budget, settings.max_retry_wait
+    object.__setattr__(settings, "source_time_budget", 8.0)
+    object.__setattr__(settings, "max_retry_wait", 2.0)
+
+    async def go():
+        c = CrossrefClient(t)
+        c.max_retries = 50
+        try:
+            return await c.safe_fetch(DOI)
+        finally:
+            await c.close()
+
+    start = _time.monotonic()
+    try:
+        r = run(go())
+    finally:
+        object.__setattr__(settings, "source_time_budget", saved[0])
+        object.__setattr__(settings, "max_retry_wait", saved[1])
+    assert r.status == ERROR and "429" in r.message
+    assert _time.monotonic() - start < 8.0
+    assert t.calls["api.crossref.org"] < 6
+
+
+# --------------------------------------------------------------------------- books and book-series proceedings
+
+def _cr(**message):
+    from backend.services.crossref import parse_crossref
+    return parse_crossref({"DOI": "10.1007/x", "title": ["T"], "publisher": "Springer Nature Singapore", **message})
+
+
+def test_book_series_conference_paper_is_a_conference():
+    """Springer registers LNNS/LNCS/CCIS conference papers as book chapters in a series."""
+    d = _cr(type="book-chapter", page="25-37",
+            **{"container-title": ["Lecture Notes in Networks and Systems",
+                                   "Proceedings of International Conference on Information Technology and AI"],
+               "ISBN": ["9789819686933", "9789819686940"], "ISSN": ["2367-3370", "2367-3389"],
+               "issn-type": [{"type": "print", "value": "2367-3370"}, {"type": "electronic", "value": "2367-3389"}]})
+    assert d["publication_type"] == "Conference"
+    assert d["journal"] is None                                      # the series is not a journal
+    assert d["conference_name"] == "International Conference on Information Technology and AI"
+    assert d["proceedings_title"] == ("Proceedings of International Conference on Information Technology and AI "
+                                      "(Lecture Notes in Networks and Systems)")
+    assert d["proceedings_isbn_issn"] == "ISBN 9789819686933; ISBN 9789819686940; ISSN 2367-3370; ISSN 2367-3389"
+    assert d["proceedings_publisher"] == "Springer Nature Singapore"
+    assert d["proceedings_volume_pages"] == "pp. 25-37"
+
+
+def test_book_chapter_keeps_isbn_and_book_details():
+    d = _cr(type="other", page="27-39", **{"container-title": ["Speech Recognition for Low Resource Languages"],
+                                           "ISBN": ["9781394213580"]})
+    assert d["publication_type"] == "Book chapter"                    # Wiley chapters come as "other"
+    assert d["journal"] is None and d["conference_name"] is None
+    assert d["proceedings_title"] == "Speech Recognition for Low Resource Languages"
+    assert d["proceedings_isbn_issn"] == "ISBN 9781394213580"
+    assert d["proceedings_volume_pages"] == "pp. 27-39"
+
+
+def test_openalex_book_series_is_not_a_journal_or_conference_name():
+    from backend.services.openalex import parse_openalex
+    d = parse_openalex({"type": "conference-paper", "primary_location": {"source": {
+        "display_name": "Lecture notes in networks and systems", "type": "book series", "issn": ["2367-3370"]}}})
+    assert d["publication_type"] == "Conference"
+    assert d["journal"] is None and d["conference_name"] is None
+    d = parse_openalex({"type": "book-chapter", "primary_location": {"source": {"type": "ebook platform"}}})
+    assert d["publication_type"] == "Book chapter"
+
+
+def test_type_from_other_sources_only_when_crossref_is_vague():
+    from backend.services import SourceResult
+
+    def merged(cr_type, oa_type):
+        return merge_sources(DOI, {
+            "crossref": SourceResult("crossref", OK, data={"title": "T", "publication_type": cr_type}),
+            "openalex": SourceResult("openalex", OK, data={"title": "T", "publication_type": oa_type}),
+        })["metrics"]["publication_type"]["preferred"]["value"]
+
+    assert merged("Book chapter", "Conference") == "Conference"
+    assert merged("Other", "Book chapter") == "Book chapter"
+    assert merged("Journal", "Conference") == "Journal"            # Crossref's journal/conference stands
+    assert merged("Conference", "Journal") == "Conference"
+    assert merged("Book chapter", "Book chapter") == "Book chapter"
+
+
+def test_incomplete_response_body_is_retried():
+    def flaky(request, n):
+        if n == 1:
+            return httpx.Response(200, content=b"")                   # dropped connection mid-reply
+        return httpx.Response(200, json=CROSSREF_OK)
+
+    t = make_transport([("api.crossref.org", flaky)])
+
+    async def go():
+        c = CrossrefClient(t)
+        try:
+            return await c.safe_fetch(DOI)
+        finally:
+            await c.close()
+
+    r = run(go())
+    assert r.status == OK and t.calls["api.crossref.org"] == 2

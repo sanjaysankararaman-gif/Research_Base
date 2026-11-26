@@ -9,7 +9,7 @@ Rules enforced here:
   whether other sources failed.
 
 Standardized record shape (stored in SQLite, returned by the API, and the
-input to the Google Sheets row builder):
+input to the Excel export and the Supabase copy):
 
 {
   "doi": "10.1038/nature14539",
@@ -35,8 +35,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..config import settings
 from ..timeutil import utc_now
 from ..services import ERROR, NOT_FOUND, OK, SOURCE_LABELS, UNAVAILABLE, SourceResult
+from .home_institution import home_institution
 from .metric_mapper import CORE_KEYS, METRICS, PER_SOURCE
 
 # Sources that can say whether a DOI exists. Indexing checks (Scopus/WoS) and
@@ -120,6 +122,8 @@ def merge_sources(
             "unavailable_reason": unavailable_reason,
         }
 
+    _complete_date(metrics["publication_date"])
+    _resolve_type(metrics["publication_type"])
     version = _version_info(doi, results, metrics, preprint_results, published_doi)
 
     core = {}
@@ -158,6 +162,40 @@ def merge_sources(
         "missing_required": missing_required,
         "version": version,
     }
+
+
+def _complete_date(metric: dict[str, Any]) -> None:
+    """Crossref sometimes has only the year and month ("2015-05"). Use another source's full
+    date only when it agrees with that year and month; otherwise keep Crossref's.
+
+    A day of "01" is not used: OpenAlex and Semantic Scholar write the 1st when they only
+    know the month, so it would look exact without being known."""
+    pref = metric["preferred"]
+    if not pref or len(str(pref["value"])) == 10:
+        return
+    for v in metric["values"]:
+        value = str(v["value"] or "")
+        if (v["available"] and len(value) == 10 and value.startswith(str(pref["value"]) + "-")
+                and not value.endswith("-01")):
+            metric["preferred"] = {"value": value, "source": v["source"], "retrieved_at": v["retrieved_at"]}
+            return
+
+
+def _resolve_type(metric: dict[str, Any]) -> None:
+    """Crossref's type wins, except where it is vague: Springer and others register many
+    conference papers as book chapters, and some chapters as "other". Then a source that
+    says "Conference" (OpenAlex, Semantic Scholar) decides, and "Other" takes any more
+    specific type. Journal and Conference from Crossref are never overridden."""
+    pref = metric["preferred"]
+    if not pref or pref["value"] not in ("Book chapter", "Book", "Other"):
+        return
+    others = [v for v in metric["values"] if v["available"] and v["source"] != pref["source"]]
+    better = next((v for v in others if v["value"] == "Conference"), None)
+    if better is None and pref["value"] == "Other":
+        better = next((v for v in others if v["value"] in ("Journal", "Book chapter", "Book")), None)
+    if better:
+        metric["preferred"] = {"value": better["value"], "source": better["source"],
+                               "retrieved_at": better["retrieved_at"]}
 
 
 def _value(metrics: dict[str, Any], key: str) -> Any:
@@ -276,6 +314,7 @@ def flatten(record: dict[str, Any]) -> dict[str, Any]:
         "other": ix_values.get("openalex") or [],
     }
     authors = _pick(record, "authors") or []
+    home = home_institution(_per_source(record, "author_affiliations"), authors)
     pdf_url = _pick(record, "pdf_url")
     oa = _per_source(record, "is_open_access")
     oa_value = next((v for v in (oa.get("openalex"), oa.get("semantic_scholar")) if v is not None), None)
@@ -299,6 +338,8 @@ def flatten(record: dict[str, Any]) -> dict[str, Any]:
         "issue": _pick(record, "issue"),
         "page_range": _pick(record, "page_range"),
         "quartile": _pick(record, "quartile"),
+        "quartile_detail": (record.get("sources", {}).get("sjr") or {}).get("message")
+        if _pick(record, "quartile") else None,
         "impact_factor": _pick(record, "impact_factor"),
         # 3. Conference
         "conference_name": _pick(record, "conference_name"),
@@ -309,6 +350,18 @@ def flatten(record: dict[str, Any]) -> dict[str, Any]:
         "proceedings_publisher": _pick(record, "proceedings_publisher"),
         "proceedings_isbn_issn": _pick(record, "proceedings_isbn_issn"),
         "proceedings_volume_pages": _pick(record, "proceedings_volume_pages"),
+        # 4. Date and institution
+        "publication_date": _pick(record, "publication_date"),
+        "home_institution": home["home_institution"],
+        "home_faculty": home["faculty"],
+        "home_faculty_text": "; ".join(f"{f['name']} ({f['faculty_id']})" for f in home["faculty"]) or (
+            f"None on the faculty list (home authors: {', '.join(home['home_authors'])})"
+            if home["home_authors"] else None),
+        "home_authors": home["home_authors"],
+        "institutions_checked": "author_affiliations" in metrics,   # False for papers saved before field 27
+        "author_affiliations": home["affiliations"],
+        "author_affiliations_text": "\n".join(
+            f"{a['author']}: {'; '.join(a['institutions']) or 'not listed'}" for a in home["affiliations"]) or None,
         # Additional
         "published_doi": (record.get("version") or {}).get("published_doi"),
         "version_note": (record.get("version") or {}).get("note"),
@@ -331,6 +384,13 @@ def flatten(record: dict[str, Any]) -> dict[str, Any]:
         else:
             provenance[key] = {"source": None, "reason": m["unavailable_reason"]}
 
+    provenance["home_institution"] = _home_provenance(record, home)
+    provenance["home_faculty"] = provenance["home_institution"]
+    if home["home_authors"] and not home["faculty"]:
+        provenance["home_faculty"] = {"source": None, "reason": (
+            f"{', '.join(home['home_authors'])}: from {settings.home_institution_name}, but not on the "
+            f"faculty list ({settings.faculty_csv_path.name}).")}
+
     return {
         "id": record.get("id"),
         "doi": record["doi"],
@@ -346,9 +406,24 @@ def flatten(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _home_provenance(record: dict[str, Any], home: dict[str, Any]) -> dict[str, Any]:
+    """Where fields 25-26 come from, or why they are empty."""
+    if home["home_institution"]:
+        return {"source": home["affiliation_source"] or "faculty list", "reason": None}
+    if "author_affiliations" not in record.get("metrics", {}):
+        reason = "This paper was saved before institutions were recorded. Look up its DOI again."
+    elif home["affiliation_source"] is None:
+        reason = ("No source lists the authors' affiliations, and no author matches the faculty list "
+                  f"of {settings.home_institution_name}.")
+    else:
+        reason = f"No author is from {settings.home_institution_name}."
+    return {"source": None, "reason": reason}
+
+
 def library_row(record: dict[str, Any]) -> dict[str, Any]:
     """Compact row for the My Library table."""
     authors = _pick(record, "authors") or []
+    home = home_institution(_per_source(record, "author_affiliations"), authors)
     return {
         "id": record.get("id"),
         "title": _pick(record, "title"),
@@ -358,6 +433,9 @@ def library_row(record: dict[str, Any]) -> dict[str, Any]:
         "publication_type": _pick(record, "publication_type"),
         "doi": record["doi"],
         "venue": _pick(record, "journal") or _pick(record, "conference_name"),
+        "publication_date": _pick(record, "publication_date"),
+        "home_institution": home["home_institution"],
+        "home_faculty": [{"faculty_id": f["faculty_id"], "name": f["name"]} for f in home["faculty"]],
         "status": record["status"],
         "updated_at": record.get("updated_at"),
     }

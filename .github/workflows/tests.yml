@@ -1,0 +1,22 @@
+# Runs the offline tests on every pull request and push. The main branch ruleset
+# requires this check ("Research Base Tests / pytest") to pass before merging.
+name: Research Base Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, backend]
+
+jobs:
+  pytest:
+    name: Research Base Tests / pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # "not live" skips the tests that call the real academic APIs.
+      - run: python -m pytest -m "not live" -q

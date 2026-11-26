@@ -31,6 +31,7 @@ from .integrations import excel_export
 from .models.schemas import ExtractRequest, ExtractResponse, JobResults, JobStatus, PaperRequest
 from .processing.data_merger import flatten, library_row
 from .processing.doi_validator import InvalidDOI, normalize_doi, parse_dois, split_bulk
+from .processing.home_institution import faculty_file, load_faculty
 from .processing.metric_mapper import describe_metrics
 from .processing.pipeline import extract_doi, run_job
 from .services import SOURCE_LABELS, build_clients
@@ -124,15 +125,19 @@ async def health():
         else "not configured (SJR_CSV_PATH)",
         "jcr_file": "enabled" if settings.impact_factor_csv_path and settings.impact_factor_csv_path.is_file()
         else "not configured (IMPACT_FACTOR_CSV_PATH)",
-        "google_scholar": "not available (no permitted integration)",
     }
+    faculty = load_faculty()
     ok = db_state == "ok"
     return JSONResponse(
         status_code=200 if ok else 503,
         content={"status": "ok" if ok else "degraded", "version": settings.version,
                  "database": db_state, "storage": db.storage_description(),
                  "storage_is_permanent": db.using_postgres() or not settings.on_vercel,
-                 "frontend": settings.frontend_dir.is_dir(), "sources": sources},
+                 "frontend": settings.frontend_dir.is_dir(), "sources": sources,
+                 "home_institution": settings.home_institution_name,
+                 "faculty": {"count": len(faculty), "file": settings.faculty_csv_path.name,
+                             "error": faculty_file.error},
+                 "supabase_copy": "enabled" if settings.supabase_db_url else "not configured (SUPABASE_DB_URL)"},
     )
 
 

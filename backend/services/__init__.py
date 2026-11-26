@@ -1,6 +1,8 @@
 """Academic data source clients.
 
 `build_clients()` returns the network sources queried for every DOI.
+Google Scholar is not one of them: it has no official API and its terms forbid
+automated access.
 Journal-level lookups (quartile, impact factor) run afterwards from local
 files; see journal_rankings.py.
 """
@@ -9,7 +11,6 @@ from __future__ import annotations
 from .base import ERROR, NOT_FOUND, OK, UNAVAILABLE, SourceClient, SourceResult
 from .crossref import CrossrefClient
 from .datacite import DataCiteClient
-from .google_scholar import GoogleScholarClient
 from .indexing import ScopusClient, WebOfScienceClient
 from .openalex import OpenAlexClient
 from .semantic_scholar import SemanticScholarClient
@@ -23,7 +24,6 @@ SOURCE_LABELS = {
     "web_of_science": "Web of Science",
     "sjr": "SCImago Journal Rank (file)",
     "jcr_file": "Impact-factor file (JCR)",
-    "google_scholar": "Google Scholar",
 }
 
 
@@ -35,7 +35,6 @@ def build_clients(transport=None) -> dict[str, SourceClient]:
         "semantic_scholar": SemanticScholarClient(transport),
         "scopus": ScopusClient(transport),
         "web_of_science": WebOfScienceClient(transport),
-        "google_scholar": GoogleScholarClient(transport),
     }
 
 

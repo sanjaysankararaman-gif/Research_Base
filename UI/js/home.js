@@ -3,12 +3,31 @@ const doiInput = document.getElementById("doi");
 const button = document.getElementById("search-button");
 const message = document.getElementById("message");
 
+let busy = false;   // a lookup is in progress
+
 function showMessage(text, type) {
     message.innerHTML = '<div class="alert alert-' + type + ' mb-0">' + escapeHtml(text) + "</div>";
 }
 
+function resetForm() {
+    busy = false;
+    button.disabled = false;
+    button.textContent = "Get details";
+}
+
+// Coming back to this page with the browser's Back button can restore it exactly as it was
+// left, with the button still disabled on "Fetching…", so a second lookup would do nothing.
+// Reset it whenever the page is shown again.
+window.addEventListener("pageshow", function (event) {
+    if (event.persisted) {
+        resetForm();
+        message.innerHTML = "";
+    }
+});
+
 form.addEventListener("submit", async function (event) {
     event.preventDefault();
+    if (busy) return;   // ignore a second click while the first lookup runs
     const doi = doiInput.value.trim();
 
     // Empty-field validation
@@ -24,6 +43,7 @@ form.addEventListener("submit", async function (event) {
     }
 
     // Send the DOI to the backend
+    busy = true;
     button.disabled = true;
     button.textContent = "Fetching…";
     showMessage("Looking up the paper… This usually takes 5–30 seconds.", "info");
@@ -33,13 +53,15 @@ form.addEventListener("submit", async function (event) {
             method: "POST",
             body: JSON.stringify({ doi: doi, refresh: true }),  // always fetch fresh details
         });
-        // Go to the details page for this paper
-        const note = paper.already_in_library ? "exists" : "added";
-        window.location.href = "details.html?paperId=" + paper.id + "&note=" + note;
+        // Hand the paper to the details page, so it shows exactly this result
+        // without asking the server again.
+        rememberPaper(paper);
+        const note = paper.warning ? "stale" : (paper.already_in_library ? "exists" : "added");
+        resetForm();
+        window.location.href = "details.html?paperId=" + encodeURIComponent(paper.id) + "&note=" + note;
     } catch (error) {
         // Handles: invalid DOI, DOI not found, sources unreachable, server offline
         showMessage(error.message, "danger");
-        button.disabled = false;
-        button.textContent = "Get details";
+        resetForm();
     }
 });

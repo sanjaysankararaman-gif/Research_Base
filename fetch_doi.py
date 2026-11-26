@@ -24,11 +24,11 @@ FIELDS = [
         (3, "Author Names", "authors_text"), (4, "Publication Year", "publication_year"),
         (5, "Publisher", "publisher"), (6, "DOI", "doi"), (7, "Publication URL", "publication_url"),
         (8, "Indexing Database", "indexing")]),
-    ("2. Journal-Specific Fields", "Journal", [
+    ("2. Journal-Specific Fields", ("Journal",), [
         (9, "Journal Name", "journal"), (10, "ISSN / E-ISSN", "issn"), (11, "Volume", "volume"),
         (12, "Issue", "issue"), (13, "Page Range / Article Number", "page_range"),
         (14, "Quartile", "quartile"), (15, "Impact Factor", "impact_factor")]),
-    ("3. Conference-Specific Fields", "Conference", [
+    ("3. Conference / Book Fields", ("Conference", "Book chapter", "Book"), [
         (16, "Conference Name", "conference_name"), (17, "Conference Acronym", "conference_acronym"),
         (18, "Conference Dates", "conference_dates"), (19, "Conference Location", "conference_location"),
         (20, "Proceedings Title", "proceedings_title"), (21, "Proceedings Publisher", "proceedings_publisher"),
@@ -44,7 +44,7 @@ FIELDS = [
 def print_fields(fields: dict) -> None:
     ptype = fields.get("publication_type")
     for title, applies, rows in FIELDS:
-        skip = applies and ptype in ("Journal", "Conference") and ptype != applies
+        skip = applies and ptype in ("Journal", "Conference", "Book chapter", "Book") and ptype not in applies
         print(f"\n{title}" + (" (not applicable)" if skip else ""))
         for number, label, key in rows:
             value = "-" if skip else (fields.get(key) if fields.get(key) not in (None, "", []) else "Not available")

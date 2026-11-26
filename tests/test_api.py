@@ -268,3 +268,14 @@ def test_repeat_lookup_of_same_doi_fetches_again(client):
     assert first.json()["id"] == second.json()["id"] == third.json()["id"]
     assert second.json()["already_in_library"] is True and "warning" not in second.json()
     assert second.json()["fields"]["title"] == "A Test Paper"
+
+
+def test_excel_cells_for_a_book_chapter():
+    from backend.integrations.excel_export import _cell
+    f = {"publication_type": "Book chapter", "journal": None, "proceedings_title": "A Book",
+         "proceedings_isbn_issn": "ISBN 9781394213580", "conference_name": None}
+    assert _cell(f, "journal", ("Journal",)) == "-"
+    assert _cell(f, "conference_name", ("Conference",)) == "-"
+    assert _cell(f, "proceedings_title", ("Conference", "Book chapter", "Book")) == "A Book"
+    assert _cell(f, "proceedings_isbn_issn", ("Conference", "Book chapter", "Book")) == "ISBN 9781394213580"
+    assert _cell({"publication_type": "Preprint"}, "journal", ("Journal",)) == "Not available"

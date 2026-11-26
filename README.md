@@ -169,6 +169,12 @@ Science are queried only through their official APIs, when the department provid
 | 27 | Author Affiliations | OpenAlex (institutions + ROR) → Crossref (affiliation text) | ✅ when the publisher deposits them |
 | extra | PDF link / availability | OpenAlex, Semantic Scholar (legal open-access copies only) | ✅ |
 
+**Book-series proceedings and book chapters.** Springer (LNCS, LNNS, CCIS...) and others register many
+conference papers as book chapters. They are recorded as Conference when the book title names a
+conference or OpenAlex / Semantic Scholar say so, with the book, series, ISBN, series ISSN and pages in
+fields 20-23. True book chapters use fields 20-23 for the book (title, publisher, ISBN, pages); the
+journal and conference-event fields are marked not applicable.
+
 A field that can't be retrieved is returned as `null`, with the reason in `provenance`.
 Nothing is guessed. A real `0` stays `0`. Citation counts from different sources are kept separately.
 

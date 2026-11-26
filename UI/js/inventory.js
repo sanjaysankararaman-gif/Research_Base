@@ -9,6 +9,14 @@ function shorten(text, max) {
     return text.length > max ? text.slice(0, max) + "…" : text;
 }
 
+// "Home" badge for papers with an author from the home institution; hover shows the faculty IDs.
+function homeBadge(paper) {
+    if (!paper.home_institution) return "";
+    const faculty = (paper.home_faculty || []).map(function (f) { return f.name + " (" + f.faculty_id + ")"; });
+    const tip = paper.home_institution + (faculty.length ? ": " + faculty.join(", ") : "");
+    return ' <span class="badge text-bg-success home-badge" title="' + escapeHtml(tip) + '">Home</span>';
+}
+
 function showRows(papers) {
     if (papers.length === 0) {
         const filtered = searchInput.value.trim() || publicationFilter.value;
@@ -20,7 +28,7 @@ function showRows(papers) {
     paperList.innerHTML = papers.map(function (paper, index) {
         return "<tr>" +
             "<td>" + (index + 1) + "</td>" +
-            "<td>" + escapeHtml(paper.title || "Untitled") + "</td>" +
+            "<td>" + escapeHtml(paper.title || "Untitled") + homeBadge(paper) + "</td>" +
             "<td>" + escapeHtml(shorten(paper.authors_text, 80)) + "</td>" +
             "<td>" + escapeHtml(paper.publication_year || "") + "</td>" +
             "<td>" + escapeHtml(paper.publication_type || "") + "</td>" +

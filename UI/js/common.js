@@ -8,15 +8,25 @@ const API_BASE = (window.location.protocol === "file:" || DEV_SERVER_PORTS.inclu
     ? "http://127.0.0.1:8000"
     : "";
 
+const REQUEST_TIMEOUT_MS = 150000;   // a lookup normally takes 5-30 s; the server gives up well before this
+
 async function apiFetch(path, options = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
     let response;
     try {
         response = await fetch(API_BASE + path, {
             headers: { "Content-Type": "application/json" },
+            cache: "no-store",
+            signal: controller.signal,
             ...options,
         });
     } catch (error) {
-        throw new Error("Cannot reach the server. Make sure the backend is running.");
+        throw new Error(error.name === "AbortError"
+            ? "The server took too long to answer. Please try again."
+            : "Cannot reach the server. Make sure the backend is running.");
+    } finally {
+        clearTimeout(timer);
     }
     let data = null;
     try { data = await response.json(); } catch (e) { /* empty body */ }
@@ -24,6 +34,22 @@ async function apiFetch(path, options = {}) {
         throw new Error((data && data.detail) || "Something went wrong (error " + response.status + ").");
     }
     return data;
+}
+
+// The Home page passes the paper it just looked up to the details page, so the details page
+// shows that exact result even if the server is restarted or another server instance answers.
+function rememberPaper(paper) {
+    try { sessionStorage.setItem("paper:" + paper.id, JSON.stringify(paper)); } catch (e) { /* storage off */ }
+}
+
+function takeRememberedPaper(paperId) {
+    try {
+        const text = sessionStorage.getItem("paper:" + paperId);
+        sessionStorage.removeItem("paper:" + paperId);
+        return text ? JSON.parse(text) : null;
+    } catch (e) {
+        return null;
+    }
 }
 
 // Escape text before putting it into HTML.

@@ -22,7 +22,7 @@ const SECTIONS = [
     },
     {
         title: "2. Journal-Specific Fields",
-        applies: "Journal",
+        applies: ["Journal"],
         fields: [
             [9, "Journal Name", "journal"],
             [10, "ISSN / E-ISSN", "issn"],
@@ -35,16 +35,18 @@ const SECTIONS = [
     },
     {
         title: "3. Conference-Specific Fields",
-        applies: "Conference",
+        bookTitle: "3. Book Fields (this is a book chapter)",
+        applies: ["Conference", "Book chapter", "Book"],
+        // [number, label, key, only for these types, label for a book chapter]
         fields: [
-            [16, "Conference Name", "conference_name"],
-            [17, "Conference Acronym", "conference_acronym"],
-            [18, "Conference Dates", "conference_dates"],
-            [19, "Conference Location", "conference_location"],
-            [20, "Proceedings Title", "proceedings_title"],
-            [21, "Proceedings Publisher", "proceedings_publisher"],
-            [22, "Proceedings ISBN / ISSN", "proceedings_isbn_issn"],
-            [23, "Proceedings Volume / Page Range", "proceedings_volume_pages"],
+            [16, "Conference Name", "conference_name", ["Conference"]],
+            [17, "Conference Acronym", "conference_acronym", ["Conference"]],
+            [18, "Conference Dates", "conference_dates", ["Conference"]],
+            [19, "Conference Location", "conference_location", ["Conference"]],
+            [20, "Proceedings Title", "proceedings_title", null, "Book Title (Series)"],
+            [21, "Proceedings Publisher", "proceedings_publisher", null, "Book Publisher"],
+            [22, "Proceedings ISBN / ISSN", "proceedings_isbn_issn", null, "Book ISBN / Series ISSN"],
+            [23, "Proceedings Volume / Page Range", "proceedings_volume_pages", null, "Volume / Page Range"],
         ],
     },
     {
@@ -69,6 +71,14 @@ function formatDate(value) {
     if (parts.length === 3 && month) return Number(parts[2]) + " " + month + " " + parts[0];
     if (parts.length === 2 && month) return month + " " + parts[0];
     return String(value);
+}
+
+// Types with their own sections. Any other type (Preprint, Other) shows every field.
+const KNOWN_TYPES = ["Journal", "Conference", "Book chapter", "Book"];
+const BOOK_TYPES = ["Book chapter", "Book"];
+
+function appliesTo(types, type) {
+    return !types || !KNOWN_TYPES.includes(type) || types.includes(type);
 }
 
 function isEmpty(value) {
@@ -150,15 +160,19 @@ function showPaper(paper) {
     let applicable = 0;
     const rows = [];
 
+    const isBook = BOOK_TYPES.includes(type);
     SECTIONS.forEach(function (section) {
         // A journal paper has no conference fields (and vice versa): say so instead of "missing".
-        const notApplicable = section.applies && (type === "Journal" || type === "Conference") && type !== section.applies;
-        rows.push('<tr class="section-row"><th colspan="3">' + escapeHtml(section.title) +
-            (notApplicable ? ' <span class="fw-normal text-secondary">(not applicable: this is a ' +
-                escapeHtml(type.toLowerCase()) + " paper)</span>" : "") + "</th></tr>");
+        const sectionNA = !appliesTo(section.applies, type);
+        const title = (isBook && section.bookTitle) || section.title;
+        rows.push('<tr class="section-row"><th colspan="3">' + escapeHtml(title) +
+            (sectionNA ? ' <span class="fw-normal text-secondary">(not applicable: this is a ' +
+                escapeHtml(type.toLowerCase()) + (isBook ? "" : " paper") + ")</span>" : "") + "</th></tr>");
 
         section.fields.forEach(function (field) {
-            const number = field[0], label = field[1], key = field[2];
+            const number = field[0], key = field[2];
+            const label = (isBook && field[4]) || field[1];
+            const notApplicable = sectionNA || !appliesTo(field[3], type);
             const value = f[key];
             let cell;
             if (notApplicable) {

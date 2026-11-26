@@ -57,10 +57,14 @@ def parse_openalex(work: dict[str, Any]) -> dict[str, Any]:
         publication_type = "Journal"
     elif work_type == "preprint" or source_type == "repository":
         publication_type = "Preprint"
+    elif work_type in ("book-chapter", "book"):
+        publication_type = "Book chapter" if work_type == "book-chapter" else "Book"
     else:
         publication_type = None   # unknown: let other sources decide
     is_conference = publication_type == "Conference"
     is_repository = source_type == "repository"
+    # A book series or ebook platform is neither a journal nor the conference's name.
+    is_book_source = source_type in ("book series", "ebook platform")
     biblio = work.get("biblio") or {}
     pages = None
     if biblio.get("first_page"):
@@ -76,10 +80,10 @@ def parse_openalex(work: dict[str, Any]) -> dict[str, Any]:
         "publication_year": work.get("publication_year"),
         "publication_date": work.get("publication_date"),
         "publication_type": publication_type,
-        "journal": None if (is_conference or is_repository) else source.get("display_name"),
+        "journal": None if (is_conference or is_repository or is_book_source) else source.get("display_name"),
         "repository": source.get("display_name") if is_repository else None,
         "is_preprint": publication_type == "Preprint",
-        "conference_name": source.get("display_name") if is_conference else None,
+        "conference_name": source.get("display_name") if (is_conference and source_type == "conference") else None,
         "publication_url": primary.get("landing_page_url"),
         "pdf_url": best_oa.get("pdf_url") or primary.get("pdf_url"),
         "indexed_in": work.get("indexed_in") or None,

@@ -123,6 +123,7 @@ def merge_sources(
         }
 
     _complete_date(metrics["publication_date"])
+    _resolve_type(metrics["publication_type"])
     version = _version_info(doi, results, metrics, preprint_results, published_doi)
 
     core = {}
@@ -178,6 +179,23 @@ def _complete_date(metric: dict[str, Any]) -> None:
                 and not value.endswith("-01")):
             metric["preferred"] = {"value": value, "source": v["source"], "retrieved_at": v["retrieved_at"]}
             return
+
+
+def _resolve_type(metric: dict[str, Any]) -> None:
+    """Crossref's type wins, except where it is vague: Springer and others register many
+    conference papers as book chapters, and some chapters as "other". Then a source that
+    says "Conference" (OpenAlex, Semantic Scholar) decides, and "Other" takes any more
+    specific type. Journal and Conference from Crossref are never overridden."""
+    pref = metric["preferred"]
+    if not pref or pref["value"] not in ("Book chapter", "Book", "Other"):
+        return
+    others = [v for v in metric["values"] if v["available"] and v["source"] != pref["source"]]
+    better = next((v for v in others if v["value"] == "Conference"), None)
+    if better is None and pref["value"] == "Other":
+        better = next((v for v in others if v["value"] in ("Journal", "Book chapter", "Book")), None)
+    if better:
+        metric["preferred"] = {"value": better["value"], "source": better["source"],
+                               "retrieved_at": better["retrieved_at"]}
 
 
 def _value(metrics: dict[str, Any], key: str) -> Any:

@@ -144,11 +144,12 @@ class SourceClient:
                 if status == 200:
                     try:
                         return response.json()
-                    except ValueError:
-                        raise SourceError(f"{self.label} returned an invalid response", status)
-                if status == 404:
+                    except ValueError:   # cut-off or empty body: a network hiccup, so retry
+                        last_error = SourceError(f"{self.label} returned an incomplete response", status)
+                        delay = None
+                elif status == 404:
                     raise NotFound()
-                if status == 429:
+                elif status == 429:
                     last_error = SourceError(f"{self.label} rate limit reached (HTTP 429)", status)
                     delay = self._retry_after(response)
                 elif status >= 500:

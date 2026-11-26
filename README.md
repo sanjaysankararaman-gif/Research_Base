@@ -45,6 +45,12 @@ and forbids automated access, so it is not used.
 Crossref/DataCite links, Semantic Scholar, or an exact title + first-author match in Crossref,
 and its details are used. Missing values are left empty with a reason; nothing is guessed.
 
+**Book-series proceedings and book chapters.** Springer (LNCS, LNNS, CCIS...) and others register many
+conference papers as book chapters. They are recorded as Conference when the book title names a
+conference or OpenAlex / Semantic Scholar say so, with the book, series, ISBN, series ISSN and pages in
+fields 20-23. True book chapters use fields 20-23 for the book (title, publisher, ISBN, pages); the
+journal and conference-event fields are marked not applicable.
+
 **Home institution** (fields 25-26): an author is from Shiv Nadar University, Chennai when an
 affiliation has its ROR ID or name (SSN College of Engineering / SSN School of Engineering also count;
 see `HOME_INSTITUTION_*` in `.env.example`). A teacher on the faculty list is linked by name, unless

@@ -51,9 +51,28 @@ PUBLICATION_TYPES = {
     "proceedings-article": "Conference",
     "proceedings": "Conference",
     "book-chapter": "Book chapter",
+    "book-section": "Book chapter",
+    "book-part": "Book chapter",
+    "reference-entry": "Book chapter",
     "book": "Book",
+    "edited-book": "Book",
+    "monograph": "Book",
+    "reference-book": "Book",
     "posted-content": "Preprint",
 }
+BOOK_TYPES = {"Book chapter", "Book"}
+
+# Springer (LNCS, LNNS, CCIS, AISC...) and others register conference papers as book chapters
+# in a book series. The book or series title gives them away.
+CONFERENCE_WORDS = re.compile(r"\b(proceedings?|conference|congress|symposium|workshop|colloquium|summit)\b", re.I)
+_PROCEEDINGS_OF = re.compile(r"^proceedings\s+of\s+(the\s+)?", re.I)
+
+
+def _conference_from_title(title: str | None) -> str | None:
+    """'Proceedings of International Conference on X' -> 'International Conference on X'."""
+    if not title or not CONFERENCE_WORDS.search(title):
+        return None
+    return _PROCEEDINGS_OF.sub("", title).strip() or None
 
 
 def _full_title(message: dict[str, Any]) -> str | None:
@@ -98,9 +117,23 @@ def parse_crossref(message: dict[str, Any]) -> dict[str, Any]:
     issn_by_type = {i.get("type"): i.get("value") for i in message.get("issn-type", []) or []}
     crossref_type = message.get("type")
     publication_type = PUBLICATION_TYPES.get(crossref_type, "Other" if crossref_type else None)
-    is_conference = publication_type == "Conference"
     event = message.get("event") or {}
-    container = _first(message.get("container-title"))
+    containers = [html.unescape(c).strip() for c in message.get("container-title") or [] if c and c.strip()]
+    container = containers[0] if containers else None
+    # A book chapter's containers are [series, book] or just [book].
+    is_book_part = publication_type in BOOK_TYPES or (crossref_type == "other" and bool(message.get("ISBN")))
+    book_title = containers[-1] if containers else None
+    series = containers[0] if len(containers) > 1 else None
+    if is_book_part and (event.get("name") or _conference_from_title(book_title) or _conference_from_title(series)):
+        publication_type = "Conference"
+    elif crossref_type == "other" and is_book_part:
+        publication_type = "Book chapter"
+    is_conference = publication_type == "Conference"
+    # The venue of a conference paper or chapter: the proceedings / book, with its series.
+    if is_book_part:
+        venue = f"{book_title} ({series})" if series and series != book_title else book_title
+    else:
+        venue = container
     pages = message.get("page") or None
     article_number = message.get("article-number") or None
     relation = message.get("relation") or {}
@@ -118,7 +151,7 @@ def parse_crossref(message: dict[str, Any]) -> dict[str, Any]:
         "publication_date": pub_date,
         "publication_year": pub_year,
         "publication_type": publication_type,
-        "journal": None if is_conference else container,
+        "journal": None if (is_conference or is_book_part) else container,
         "publisher": message.get("publisher"),
         "volume": message.get("volume"),
         "issue": message.get("issue"),
@@ -137,19 +170,24 @@ def parse_crossref(message: dict[str, Any]) -> dict[str, Any]:
         "is_preprint": crossref_type == "posted-content",
         "published_doi": published[0] if published else None,
         "publication_url": resource_url or (f"https://doi.org/{message['DOI'].lower()}" if message.get("DOI") else None),
-        # Conference-specific (Crossref "event" metadata, deposited by the publisher)
-        "conference_name": (html.unescape(event["name"]) if event.get("name") else None) if is_conference else None,
+        # Conference-specific (Crossref "event" metadata, deposited by the publisher). For a
+        # conference paper published as a book chapter without event data, the book title
+        # names the conference when it says so ("Proceedings of ... Conference on ...").
+        "conference_name": ((html.unescape(event["name"]) if event.get("name") else None)
+                            or (_conference_from_title(book_title) if is_book_part else None)) if is_conference else None,
         "conference_acronym": event.get("acronym") if is_conference else None,
         "conference_dates": _event_dates(event) if is_conference else None,
         "conference_location": event.get("location") if is_conference else None,
-        "proceedings_title": container if is_conference else None,
-        "proceedings_publisher": message.get("publisher") if is_conference else None,
+        # Proceedings fields; for a book chapter they describe the book.
+        "proceedings_title": venue if (is_conference or is_book_part) else None,
+        "proceedings_publisher": message.get("publisher") if (is_conference or is_book_part) else None,
         "proceedings_isbn_issn": "; ".join([*(f"ISBN {i}" for i in isbn or []), *(f"ISSN {i}" for i in issn or [])]) or None
-        if is_conference else None,
+        if (is_conference or is_book_part) else None,
         "proceedings_volume_pages": ", ".join(
             x for x in (f"Vol. {message['volume']}" if message.get("volume") else None,
                         f"pp. {pages}" if pages else None) if x
-        ) or None if is_conference else None,
+        ) or None if (is_conference or is_book_part) else None,
+        "book_series": series if is_book_part else None,
         "abstract": strip_jats(message.get("abstract")),
         "citation_count": message.get("is-referenced-by-count"),
         "reference_count": message.get("references-count", message.get("reference-count")),
@@ -167,7 +205,8 @@ class CrossrefClient(SourceClient):
 
     def __init__(self, transport=None):
         super().__init__(transport)
-        self.min_interval = settings.crossref_min_interval
+        # The public pool allows 5 requests a second; the polite pool (CONTACT_EMAIL) allows 10.
+        self.min_interval = max(settings.crossref_min_interval, 0.0 if settings.contact_email else 0.2)
 
     def default_params(self) -> dict[str, str]:
         return {"mailto": settings.contact_email} if settings.contact_email else {}

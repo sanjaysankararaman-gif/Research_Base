@@ -74,20 +74,23 @@ def _event_dates(event: dict[str, Any]) -> str | None:
 
 
 def parse_crossref(message: dict[str, Any]) -> dict[str, Any]:
-    authors = []
-    affiliations: dict[str, list[str]] = {}
+    authors, authorships = [], []
     for a in message.get("author", []) or []:
         name = " ".join(p for p in (a.get("given"), a.get("family")) if p) or a.get("name")
         if not name:
             continue
         authors.append(name)
-        affs = [x.get("name") for x in a.get("affiliation", []) if x.get("name")]
-        if affs:
-            affiliations[name] = affs
+        affs = a.get("affiliation") or []
+        authorships.append({
+            "name": name,
+            "institutions": [html.unescape(x["name"]).strip() for x in affs if x.get("name")],
+            "ror": [i.get("id") for x in affs for i in x.get("id") or []
+                    if (i.get("id-type") or "").upper() == "ROR" and i.get("id")],
+        })
 
-    # Prefer the earliest "published" date Crossref gives (print or online).
+    # "published" is Crossref's earliest of the print and online dates; the others are fallbacks.
     pub_date, pub_year = None, None
-    for key in ("published", "published-print", "published-online", "issued"):
+    for key in ("published", "published-online", "published-print", "issued"):
         pub_date, pub_year = _date_from_parts(message.get(key))
         if pub_date:
             break
@@ -111,7 +114,7 @@ def parse_crossref(message: dict[str, Any]) -> dict[str, Any]:
         "doi": (message.get("DOI") or "").lower() or None,
         "title": _full_title(message),
         "authors": authors or None,
-        "author_affiliations": affiliations or None,
+        "authorships": authorships if any(a["institutions"] for a in authorships) else None,
         "publication_date": pub_date,
         "publication_year": pub_year,
         "publication_type": publication_type,

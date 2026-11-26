@@ -21,7 +21,9 @@ reported as unavailable with the reason. Nothing is estimated.
 from __future__ import annotations
 
 import csv
+import html
 import logging
+import re
 from pathlib import Path
 
 from ..config import settings
@@ -72,18 +74,44 @@ class _FileLookup:
         raise NotImplementedError
 
 
+def _norm_title(value: str | None) -> str:
+    """'The Journal of Physical Chemistry B' and 'Journal of physical chemistry. B' match."""
+    text = re.sub(r"[^a-z0-9 ]", " ", html.unescape(value or "").lower().replace("&", " and "))
+    words = [w for w in text.split() if w != "the"]
+    return " ".join(words)
+
+
 class SJRLookup(_FileLookup):
+    """SCImago export: ISSN -> best quartile. Also an exact-title index, used only for
+    journals that have no ISSN in any source, and only for titles that occur once in the file."""
+
     def load(self, path: Path) -> dict[str, dict]:
         out: dict[str, dict] = {}
+        titles: dict[str, dict | None] = {}
         with path.open(encoding="utf-8-sig", newline="") as fh:
             for row in _sniff_reader(fh):
                 quartile = (row.get("SJR Best Quartile") or "").strip()
+                entry = {"quartile": quartile if quartile in ("Q1", "Q2", "Q3", "Q4") else None,
+                         "title": (row.get("Title") or "").strip()}
                 for issn in (row.get("Issn") or "").split(","):
                     key = _norm_issn(issn)
                     if key:
-                        out[key] = {"quartile": quartile if quartile in ("Q1", "Q2", "Q3", "Q4") else None,
-                                    "title": (row.get("Title") or "").strip()}
+                        out.setdefault(key, entry)   # the file is in rank order: keep the first
+                title = _norm_title(entry["title"])
+                if title:
+                    titles[title] = None if title in titles else entry
+        self.titles = {k: v for k, v in titles.items() if v}
         return out
+
+    def by_title(self, title: str | None) -> dict | None:
+        self.index()   # (re)load the file if needed
+        return getattr(self, "titles", {}).get(_norm_title(title)) if title else None
+
+    def year(self) -> str | None:
+        """'2025' from scimagojr_2025.csv, for the provenance message."""
+        p = self.path()
+        m = re.search(r"(19|20)\d\d", p.name) if p else None
+        return m.group(0) if m else None
 
 
 class ImpactFactorLookup(_FileLookup):
@@ -115,17 +143,24 @@ def _lookup(table: _FileLookup, issns: list[str]) -> dict | None:
     return None
 
 
-def lookup_quartile(issns: list[str]) -> SourceResult:
+def lookup_quartile(issns: list[str], journal_titles: list[str] | None = None) -> SourceResult:
+    """SCImago best quartile by ISSN. A journal with no ISSN in any source is matched by its
+    exact title instead (punctuation and case ignored)."""
     if not sjr.path():
         return SourceResult("sjr", UNAVAILABLE,
                             message="Not checked: no SCImago (SJR) file configured. Set SJR_CSV_PATH.")
-    if not issns:
-        return SourceResult("sjr", NOT_FOUND, message="No ISSN available for this publication, so it cannot be ranked")
-    hit = _lookup(sjr, issns)
+    label = f"SCImago Journal Rank {sjr.year()}" if sjr.year() else "SCImago Journal Rank"
+    hit, matched_by = _lookup(sjr, issns), "ISSN"
+    if not hit and not issns:
+        hit = next((h for h in map(sjr.by_title, journal_titles or []) if h), None)
+        matched_by = "exact journal title (no ISSN in any source)"
     if not hit:
-        return SourceResult("sjr", NOT_FOUND, message="Journal ISSN not found in the SCImago file")
-    return SourceResult("sjr", OK, data={"quartile": hit["quartile"] or "N/A", "sjr_title": hit["title"]},
-                        message="SCImago (SJR) best quartile")
+        return SourceResult("sjr", NOT_FOUND, message=(
+            "Journal ISSN not found in the SCImago file" if issns
+            else "No ISSN available for this publication, and its title is not in the SCImago file"))
+    quartile = hit["quartile"] or "N/A"
+    return SourceResult("sjr", OK, data={"quartile": quartile, "sjr_title": hit["title"]},
+                        message=f"{label}: best quartile {quartile} for '{hit['title']}', matched by {matched_by}")
 
 
 def lookup_impact_factor(issns: list[str]) -> SourceResult:

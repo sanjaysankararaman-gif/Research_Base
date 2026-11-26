@@ -6,8 +6,9 @@ To add a metric
 Append a `MetricDefinition` to `METRICS`. `sources` maps a source name to the
 field that source's service module extracts (see `parse_*` functions in
 `backend/services/`). If the field is not extracted yet, add one line to that
-service's `parse_*` function. Nothing else changes: merging, storage, the API,
-the UI detail view and the Google Sheets row builder all read this registry.
+service's `parse_*` function. Merging, storage and the API read this registry;
+to show the field, add it to `flatten()` in data_merger.py, the Excel columns
+(integrations/excel_export.py) and the details page (UI/js/details.js).
 
 To remove a metric from output / spreadsheets: set `requested=False`.
 To change a spreadsheet column name: edit `column`.
@@ -64,6 +65,8 @@ SCOPUS, WOS, SJR, JCR = "scopus", "web_of_science", "sjr", "jcr_file"
 # Order and numbering follow "Essential Fields for Research Publication Database".
 # `extra={"field_no": n, "group": ...}` ties each entry to that document.
 COMMON, JOURNAL, CONFERENCE, ADDITIONAL = "common", "journal", "conference", "additional"
+# Fields 24-27 were added by the department after the original list of 23.
+DATE_INSTITUTION = "date_institution"
 
 
 def _f(no: int, group: str) -> dict[str, Any]:
@@ -133,6 +136,21 @@ METRICS: list[MetricDefinition] = [
     MetricDefinition("proceedings_volume_pages", "Proceedings Volume / Page Range", "conference",
                      {CR: "proceedings_volume_pages", OA: "volume_pages"}, extra=_f(23, CONFERENCE)),
 
+    # ---------------------------------------------------------- 4. Date and institution
+    MetricDefinition("publication_date", "Publication Date", "bibliographic",
+                     {CR: "publication_date", OA: "publication_date", S2: "publication_date"}, value_type="date",
+                     extra=_f(24, DATE_INSTITUTION),
+                     description="Earliest publication date (online or print) from Crossref, as YYYY-MM-DD, or "
+                                 "YYYY-MM when the publisher deposited no day. A full date from OpenAlex or "
+                                 "Semantic Scholar is used only when it agrees with Crossref's year and month "
+                                 "and its day is not 01 (their placeholder for an unknown day)."),
+    # 25 Home Institution and 26 Home Faculty are worked out from these affiliations and the
+    # faculty list (processing/home_institution.py); they are not fetched from a source.
+    MetricDefinition("author_affiliations", "Author Affiliations", "affiliation",
+                     {OA: "authorships", CR: "authorships"}, value_type="json", extra=_f(27, DATE_INSTITUTION),
+                     description="Institutions of each author, in published order: OpenAlex (normalized "
+                                 "institution names with ROR IDs), else the affiliation text in Crossref."),
+
     # ---------------------------------------------------------- Additional (not in the field list)
     MetricDefinition("published_doi", "Published Version DOI", "identifier",
                      {CR: "published_doi", DC: "published_doi", S2: "published_doi"}, extra=_f(0, ADDITIONAL),
@@ -142,9 +160,6 @@ METRICS: list[MetricDefinition] = [
     MetricDefinition("is_open_access", "Open Access", "access",
                      {OA: "is_open_access", S2: "is_open_access"}, merge=PER_SOURCE, value_type="boolean",
                      extra=_f(0, ADDITIONAL)),
-    MetricDefinition("publication_date", "Publication Date", "bibliographic",
-                     {CR: "publication_date", OA: "publication_date", S2: "publication_date"}, value_type="date",
-                     requested=False, extra=_f(0, ADDITIONAL)),
     MetricDefinition("citation_count", "Citation Count", "citation",
                      {CR: "citation_count", OA: "citation_count", S2: "citation_count"},
                      merge=PER_SOURCE, value_type="number", requested=False, extra=_f(0, ADDITIONAL),
@@ -170,16 +185,8 @@ METRICS: list[MetricDefinition] = [
 
 METRICS_BY_KEY: dict[str, MetricDefinition] = {m.key: m for m in METRICS}
 
-# Fields shown in the main results table / summary block.
+# Values copied into the papers table columns (see database.save_paper).
 CORE_KEYS = ["title", "publication_type", "authors", "journal", "publisher", "publication_year", "publication_date"]
-
-
-def get_metric(key: str) -> MetricDefinition:
-    return METRICS_BY_KEY[key]
-
-
-def requested_metrics() -> list[MetricDefinition]:
-    return [m for m in METRICS if m.requested]
 
 
 def describe_metrics() -> list[dict[str, Any]]:

@@ -12,10 +12,18 @@ os.environ["DATABASE_PATH"] = str(_TMP / "test.db")
 os.environ["LOG_DIR"] = str(_TMP / "logs")
 os.environ["EXCEL_PATH"] = str(_TMP / "research_papers.xlsx")
 os.environ.setdefault("MAX_RETRY_WAIT_SECONDS", "0.05")
-# Tests must not depend on the developer's .env (keys, ranking files).
+# Tests must not depend on the developer's .env (keys, ranking files, Supabase).
 for _var in ("SJR_CSV_PATH", "IMPACT_FACTOR_CSV_PATH", "SCOPUS_API_KEY", "WOS_API_KEY",
-             "SEMANTIC_SCHOLAR_API_KEY", "OPENALEX_API_KEY"):
+             "SEMANTIC_SCHOLAR_API_KEY", "OPENALEX_API_KEY", "SUPABASE_DB_URL",
+             "HOME_INSTITUTION_NAME", "HOME_INSTITUTION_ROR", "HOME_INSTITUTION_ALIASES"):
     os.environ[_var] = ""
+# A fixed faculty list for the tests (the real one is reference/faculty.csv).
+(_TMP / "faculty.csv").write_text(
+    "faculty_id,full_name,given_names,family_name,name_variants\n"
+    "SNUC-F0001,Ada Lovelace,Ada,Lovelace,\n"
+    "SNUC-F0002,Alan Turing,Alan,Turing,\n"
+    "SNUC-F0003,K.S. Gayathri,K S,Gayathri,Gayathri Kanchi\n")
+os.environ["FACULTY_CSV_PATH"] = str(_TMP / "faculty.csv")
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402
@@ -77,10 +85,11 @@ OPENALEX_OK = {
     "referenced_works_count": 24,
     "referenced_works": ["https://openalex.org/W1", "https://openalex.org/W2"],
     "authorships": [
-        {"author": {"display_name": "Ada Lovelace"},
-         "institutions": [{"id": "I1", "display_name": "Analytical College", "country_code": "GB", "type": "education"}]},
+        {"author": {"display_name": "Ada Lovelace"}, "raw_author_name": "Ada Lovelace",
+         "institutions": [{"id": "I1", "display_name": "Analytical College", "country_code": "GB",
+                           "type": "education", "ror": "https://ror.org/000000000"}],
+         "raw_affiliation_strings": ["Analytical College, London"]},
     ],
-    "institutions_distinct_count": 1,
     "open_access": {"is_oa": False, "oa_status": "closed", "oa_url": None},
     "primary_location": {"source": {"display_name": "Journal of Tests", "issn": ["1234-5678"]}},
     "biblio": {"volume": "12", "issue": "3", "first_page": "100", "last_page": "110"},

@@ -30,28 +30,20 @@ def reconstruct_abstract(inverted: dict[str, list[int]] | None) -> str | None:
 
 
 def parse_openalex(work: dict[str, Any]) -> dict[str, Any]:
-    authors, affiliations, institutions = [], {}, []
-    seen_inst = set()
+    authors, authorships = [], []
     for a in work.get("authorships", []) or []:
         name = (a.get("author") or {}).get("display_name") or a.get("raw_author_name")
         if not name:
             continue
         authors.append(name)
-        insts = [i.get("display_name") for i in a.get("institutions", []) or [] if i.get("display_name")]
-        if insts:
-            affiliations[name] = insts
-        for i in a.get("institutions", []) or []:
-            key = i.get("id") or i.get("display_name")
-            if key and key not in seen_inst:
-                seen_inst.add(key)
-                institutions.append(
-                    {
-                        "name": i.get("display_name"),
-                        "country": i.get("country_code"),
-                        "type": i.get("type"),
-                        "ror": i.get("ror"),
-                    }
-                )
+        insts = a.get("institutions", []) or []
+        authorships.append({
+            "name": name,
+            "raw_name": a.get("raw_author_name"),
+            "institutions": [i["display_name"] for i in insts if i.get("display_name")],
+            "ror": [i["ror"] for i in insts if i.get("ror")],
+            "raw_affiliations": [r for r in a.get("raw_affiliation_strings") or [] if r],
+        })
 
     oa = work.get("open_access") or {}
     primary = work.get("primary_location") or {}
@@ -80,10 +72,7 @@ def parse_openalex(work: dict[str, Any]) -> dict[str, Any]:
         "openalex_id": _short_id(work.get("id")),
         "title": work.get("display_name") or work.get("title"),
         "authors": authors or None,
-        "author_affiliations": affiliations or None,
-        "institutions": institutions or None,
-        "institution_count": work.get("institutions_distinct_count"),
-        "country_count": work.get("countries_distinct_count"),
+        "authorships": authorships if any(a["institutions"] or a["raw_affiliations"] for a in authorships) else None,
         "publication_year": work.get("publication_year"),
         "publication_date": work.get("publication_date"),
         "publication_type": publication_type,

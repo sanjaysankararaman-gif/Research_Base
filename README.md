@@ -1,7 +1,8 @@
 # Research_Base (`scraping` branch): data retrieval
 
 Takes a paper's DOI and fetches the 23 fields from *Essential Fields for Research Publication
-Database* from official academic APIs. This branch is the data-retrieval part only. The
+Database* from official academic APIs, plus fields 24-27: publication date, home institution,
+home faculty (with each teacher's faculty ID) and author affiliations. This branch is the data-retrieval part only. The
 `backend` branch builds on it and adds the API, database, Excel file and connected pages.
 
 ## Try it
@@ -31,17 +32,23 @@ and forbids automated access, so it is not used.
 
 | Source | Used for |
 |--------|----------|
-| Crossref | Title, authors, year, publisher, URL, journal, ISSN, volume, issue, pages, conference name / acronym / dates / location, proceedings details |
+| Crossref | Title, authors, year, publication date, publisher, URL, journal, ISSN, volume, issue, pages, conference name / acronym / dates / location, proceedings details, affiliation text |
 | DataCite | DOIs Crossref doesn't have (arXiv, Zenodo, repositories) |
-| OpenAlex | Fallback for type / venue / pages, "Other" indexing, PDF link, E-ISSN |
+| OpenAlex | Fallback for type / venue / pages / date, "Other" indexing, PDF link, E-ISSN, author institutions (with ROR IDs) |
 | Semantic Scholar | Conference venue and acronym, where a preprint was published, PDF link |
 | Scopus / Web of Science APIs | Indexing (field 8), only with institutional keys |
-| SCImago file | Quartile (field 14), from the free SJR download (`SJR_CSV_PATH`) |
+| SCImago file | Quartile (field 14): `reference/scimagojr_2025.csv`, used automatically; matched by ISSN, or exact title when no ISSN |
+| Faculty list | Home faculty and their IDs (field 26): `reference/faculty.csv` (see `reference/README.md`) |
 | JCR file | Impact factor (field 15), only with licensed data (`IMPACT_FACTOR_CSV_PATH`) |
 
 **Preprints** (e.g. `10.48550/arXiv.1706.03762`): the published version is found through
 Crossref/DataCite links, Semantic Scholar, or an exact title + first-author match in Crossref,
 and its details are used. Missing values are left empty with a reason; nothing is guessed.
+
+**Home institution** (fields 25-26): an author is from Shiv Nadar University, Chennai when an
+affiliation has its ROR ID or name (SSN College of Engineering / SSN School of Engineering also count;
+see `HOME_INSTITUTION_*` in `.env.example`). A teacher on the faculty list is linked by name, unless
+every source places that author at another institution.
 
 ## Code
 
@@ -54,7 +61,9 @@ backend/
     doi_validator.py           DOI normalization / validation
     metric_mapper.py           the field list, numbered as in the field document
     data_merger.py             merges sources, keeps provenance, builds the flat fields
+    home_institution.py        home institution and faculty matching (fields 25-27)
     retrieval.py               retrieve(doi, clients) -> record   <- entry point
+reference/                     scimagojr_2025.csv (quartiles), faculty.csv (teachers and their IDs)
 ```
 
 Using it from other code:

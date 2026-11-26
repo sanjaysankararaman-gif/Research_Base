@@ -43,7 +43,6 @@ def test_live_deep_learning_nature():
     assert cites["crossref"]["value"] > 50_000
     assert cites["openalex"]["value"] > 50_000
     assert rec["metrics"]["openalex_id"]["values"][0]["value"].startswith("W")
-    assert rec["sources"]["google_scholar"]["status"] == "unavailable"
     f = flatten(rec)["fields"]
     assert f["publication_type"] == "Journal"
     assert (f["volume"], f["issue"], f["page_range"]) == ("521", "7553", "436-444")

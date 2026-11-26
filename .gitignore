@@ -1,11 +1,4 @@
-venv/
-.venv/
 env/
-__pycache__/
-*.pyc
-.DS_Store
-EOF
-# --- added for the Python backend ---
 # Secrets and credentials
 .env
 .env.*
@@ -35,3 +28,4 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+.claude/

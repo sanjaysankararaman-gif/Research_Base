@@ -58,6 +58,10 @@ def _sjr_path() -> Path | None:
     return _default_sjr_file()
 
 
+def _list(name: str, default: str, sep: str = ",") -> tuple[str, ...]:
+    return tuple(p.strip() for p in (os.getenv(name) or default).split(sep) if p.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "Research Base - Data Retrieval API"
@@ -77,6 +81,21 @@ class Settings:
     impact_factor_csv_path: Path | None = field(
         default_factory=lambda: _optional_path("IMPACT_FACTOR_CSV_PATH", None))
 
+    # Home institution (see processing/home_institution.py). An author counts as home when an
+    # affiliation has one of these ROR IDs, or contains every word of one of the aliases.
+    # The SSN aliases are on purpose: SNU Chennai's School of Engineering is the "SSN School of
+    # Engineering", and sources often list its staff under SSN College of Engineering.
+    home_institution_name: str = field(default_factory=lambda: (
+        os.getenv("HOME_INSTITUTION_NAME") or "Shiv Nadar University, Chennai").strip())
+    home_institution_rors: tuple[str, ...] = field(default_factory=lambda: _list(
+        "HOME_INSTITUTION_ROR", "039rg7508,054psm803"))
+    home_institution_aliases: tuple[str, ...] = field(default_factory=lambda: _list(
+        "HOME_INSTITUTION_ALIASES",
+        "Shiv Nadar University Chennai; Shiv Nadar Kalavakkam; SNU Chennai; Sivasubramaniya Nadar; "
+        "SSN College of Engineering; SSN School of Engineering", sep=";"))
+    # Home-institution faculty, one row per teacher with a fixed faculty_id.
+    faculty_csv_path: Path = field(default_factory=lambda: _path("FACULTY_CSV_PATH", "reference/faculty.csv"))
+
     # Browser origins allowed to call the API ("*" = any, fine for local development)
     cors_origins: list[str] = field(default_factory=lambda: [
         o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()])
@@ -90,6 +109,9 @@ class Settings:
         os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "").strip())
     database_path: Path = field(default_factory=lambda: _path(
         "DATABASE_PATH", "/tmp/research_data.db" if ON_VERCEL else "data/research_data.db"))
+    # Optional second copy in Supabase as normalized tables for reports
+    # (backend/integrations/database/supabase_schema.sql). Not set: not written.
+    supabase_db_url: str = field(default_factory=lambda: os.getenv("SUPABASE_DB_URL", "").strip())
 
     # Excel copy on disk (local use). On Vercel the file is built on demand for downloads.
     excel_path: Path | None = field(default_factory=lambda: _optional_path(
@@ -103,6 +125,9 @@ class Settings:
     request_timeout: float = field(default_factory=lambda: _float("REQUEST_TIMEOUT_SECONDS", 20.0))
     max_retries: int = field(default_factory=lambda: _int("MAX_RETRIES", 3))
     max_retry_wait: float = field(default_factory=lambda: _float("MAX_RETRY_WAIT_SECONDS", 30.0))
+    # Most time one source may spend on one request, retries included. Keeps a lookup well
+    # inside the browser's patience and Vercel's 120-second limit when a source is rate limited.
+    source_time_budget: float = field(default_factory=lambda: _float("SOURCE_TIME_BUDGET_SECONDS", 40.0))
 
     crossref_min_interval: float = field(default_factory=lambda: _float("CROSSREF_MIN_INTERVAL", 0.1))
     openalex_min_interval: float = field(default_factory=lambda: _float("OPENALEX_MIN_INTERVAL", 0.15))

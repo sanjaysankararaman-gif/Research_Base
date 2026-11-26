@@ -34,6 +34,10 @@ FIELDS = [
         (20, "Proceedings Title", "proceedings_title"), (21, "Proceedings Publisher", "proceedings_publisher"),
         (22, "Proceedings ISBN / ISSN", "proceedings_isbn_issn"),
         (23, "Proceedings Volume / Page Range", "proceedings_volume_pages")]),
+    ("4. Date and Institution", None, [
+        (24, "Publication Date", "publication_date"), (25, "Home Institution", "home_institution"),
+        (26, "Home Faculty (Faculty ID)", "home_faculty_text"),
+        (27, "Author Affiliations", "author_affiliations_text")]),
 ]
 
 
@@ -44,6 +48,10 @@ def print_fields(fields: dict) -> None:
         print(f"\n{title}" + (" (not applicable)" if skip else ""))
         for number, label, key in rows:
             value = "-" if skip else (fields.get(key) if fields.get(key) not in (None, "", []) else "Not available")
+            if key in ("home_institution", "home_faculty_text") and value == "Not available" \
+                    and fields.get("institutions_checked"):
+                value = "No"
+            value = str(value).replace("\n", "\n" + " " * 41)   # one affiliation per line
             print(f"  {number:>2}. {label:<34} {value}")
     if fields.get("version_note"):
         print(f"\nNote: {fields['version_note']}")

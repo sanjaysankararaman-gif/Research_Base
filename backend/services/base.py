@@ -6,7 +6,8 @@ which returns a `SourceResult`. This class provides:
 * one shared `httpx.AsyncClient` per source with a request timeout
 * per-source rate limiting (minimum interval between requests)
 * retries with exponential backoff for timeouts, network errors, HTTP 429 and
-  HTTP 5xx, honouring the `Retry-After` header when the server sends one
+  HTTP 5xx, honouring the `Retry-After` header when the server sends one, within
+  a time budget per request (SOURCE_TIME_BUDGET_SECONDS)
 * consistent error classification so one failing source never breaks the
   others (partial success)
 """
@@ -125,12 +126,15 @@ class SourceClient:
         merged = {**self.default_params(), **(params or {})}
         attempts = (self.max_retries if self.max_retries is not None else settings.max_retries) + 1
         last_error: SourceError | None = None
+        started = time.monotonic()
         for attempt in range(1, attempts + 1):
             await self._throttle()
+            left = settings.source_time_budget - (time.monotonic() - started)
+            timeout = max(5.0, min(self.timeout or settings.request_timeout, left))
             try:
-                response = await self.client.get(path, params=merged or None)
+                response = await self.client.get(path, params=merged or None, timeout=timeout)
             except httpx.TimeoutException:
-                last_error = SourceError(f"{self.label} timed out after {self.timeout or settings.request_timeout:.0f}s")
+                last_error = SourceError(f"{self.label} timed out after {timeout:.0f}s")
                 delay = None
             except httpx.HTTPError as exc:
                 last_error = SourceError(f"Could not connect to {self.label} ({type(exc).__name__})")
@@ -140,11 +144,12 @@ class SourceClient:
                 if status == 200:
                     try:
                         return response.json()
-                    except ValueError:
-                        raise SourceError(f"{self.label} returned an invalid response", status)
-                if status == 404:
+                    except ValueError:   # cut-off or empty body: a network hiccup, so retry
+                        last_error = SourceError(f"{self.label} returned an incomplete response", status)
+                        delay = None
+                elif status == 404:
                     raise NotFound()
-                if status == 429:
+                elif status == 429:
                     last_error = SourceError(f"{self.label} rate limit reached (HTTP 429)", status)
                     delay = self._retry_after(response)
                 elif status >= 500:
@@ -160,6 +165,12 @@ class SourceClient:
             if attempt < attempts:
                 backoff = delay if delay is not None else (2 ** (attempt - 1)) + random.uniform(0, 0.5)
                 backoff = min(backoff, settings.max_retry_wait)
+                # Stop retrying when the next attempt could not finish within the time budget.
+                remaining = settings.source_time_budget - (time.monotonic() - started) - backoff
+                if remaining < 5.0:
+                    log.warning("%s: giving up on %s after %.0fs (time budget %.0fs)", self.label, path,
+                                time.monotonic() - started, settings.source_time_budget)
+                    break
                 log.warning(
                     "%s attempt %d/%d failed for %s: %s — retrying in %.1fs",
                     self.label, attempt, attempts, path, last_error, backoff,

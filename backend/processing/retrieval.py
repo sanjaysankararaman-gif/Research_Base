@@ -56,13 +56,17 @@ async def _query_all(doi: str, clients: dict[str, SourceClient], on_source_done=
 
     # Journal-level lookups by ISSN (local files, no network).
     issns: list[str] = []
+    journals: list[str] = []
     for name in ("crossref", "openalex"):
         r = results.get(name)
         if r and r.status == OK:
             issns += [i for i in (r.data.get("issn") or []) if i not in issns]
-    for name, lookup in (("sjr", lookup_quartile), ("jcr_file", lookup_impact_factor)):
+            if r.data.get("journal"):
+                journals.append(r.data["journal"])
+    lookups = (("sjr", lambda: lookup_quartile(issns, journals)), ("jcr_file", lambda: lookup_impact_factor(issns)))
+    for name, lookup in lookups:
         try:
-            results[name] = lookup(issns)
+            results[name] = lookup()
         except Exception:
             log.exception("Journal lookup %s failed for %s", name, doi)
             results[name] = SourceResult(name, "error", message="Could not read the journal ranking file")

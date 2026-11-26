@@ -30,28 +30,20 @@ def reconstruct_abstract(inverted: dict[str, list[int]] | None) -> str | None:
 
 
 def parse_openalex(work: dict[str, Any]) -> dict[str, Any]:
-    authors, affiliations, institutions = [], {}, []
-    seen_inst = set()
+    authors, authorships = [], []
     for a in work.get("authorships", []) or []:
         name = (a.get("author") or {}).get("display_name") or a.get("raw_author_name")
         if not name:
             continue
         authors.append(name)
-        insts = [i.get("display_name") for i in a.get("institutions", []) or [] if i.get("display_name")]
-        if insts:
-            affiliations[name] = insts
-        for i in a.get("institutions", []) or []:
-            key = i.get("id") or i.get("display_name")
-            if key and key not in seen_inst:
-                seen_inst.add(key)
-                institutions.append(
-                    {
-                        "name": i.get("display_name"),
-                        "country": i.get("country_code"),
-                        "type": i.get("type"),
-                        "ror": i.get("ror"),
-                    }
-                )
+        insts = a.get("institutions", []) or []
+        authorships.append({
+            "name": name,
+            "raw_name": a.get("raw_author_name"),
+            "institutions": [i["display_name"] for i in insts if i.get("display_name")],
+            "ror": [i["ror"] for i in insts if i.get("ror")],
+            "raw_affiliations": [r for r in a.get("raw_affiliation_strings") or [] if r],
+        })
 
     oa = work.get("open_access") or {}
     primary = work.get("primary_location") or {}
@@ -65,10 +57,14 @@ def parse_openalex(work: dict[str, Any]) -> dict[str, Any]:
         publication_type = "Journal"
     elif work_type == "preprint" or source_type == "repository":
         publication_type = "Preprint"
+    elif work_type in ("book-chapter", "book"):
+        publication_type = "Book chapter" if work_type == "book-chapter" else "Book"
     else:
         publication_type = None   # unknown: let other sources decide
     is_conference = publication_type == "Conference"
     is_repository = source_type == "repository"
+    # A book series or ebook platform is neither a journal nor the conference's name.
+    is_book_source = source_type in ("book series", "ebook platform")
     biblio = work.get("biblio") or {}
     pages = None
     if biblio.get("first_page"):
@@ -80,17 +76,14 @@ def parse_openalex(work: dict[str, Any]) -> dict[str, Any]:
         "openalex_id": _short_id(work.get("id")),
         "title": work.get("display_name") or work.get("title"),
         "authors": authors or None,
-        "author_affiliations": affiliations or None,
-        "institutions": institutions or None,
-        "institution_count": work.get("institutions_distinct_count"),
-        "country_count": work.get("countries_distinct_count"),
+        "authorships": authorships if any(a["institutions"] or a["raw_affiliations"] for a in authorships) else None,
         "publication_year": work.get("publication_year"),
         "publication_date": work.get("publication_date"),
         "publication_type": publication_type,
-        "journal": None if (is_conference or is_repository) else source.get("display_name"),
+        "journal": None if (is_conference or is_repository or is_book_source) else source.get("display_name"),
         "repository": source.get("display_name") if is_repository else None,
         "is_preprint": publication_type == "Preprint",
-        "conference_name": source.get("display_name") if is_conference else None,
+        "conference_name": source.get("display_name") if (is_conference and source_type == "conference") else None,
         "publication_url": primary.get("landing_page_url"),
         "pdf_url": best_oa.get("pdf_url") or primary.get("pdf_url"),
         "indexed_in": work.get("indexed_in") or None,

@@ -55,10 +55,18 @@ git add UI/details.html && git commit --no-edit
 ## Deploying on Vercel
 
 1. vercel.com → **Add New… → Project** → import `Research_Base` (branch `main`). Vercel
-   detects FastAPI. `pyproject.toml` tells it to run `backend/main.py`, so the older root
-   `main.py` is not used.
-2. Optional environment variables: `CONTACT_EMAIL`, `SEMANTIC_SCHOLAR_API_KEY`.
+   detects FastAPI. `pyproject.toml` (`[tool.vercel] entrypoint = "backend.main:app"`)
+   tells it to run `backend/main.py`.
+2. Optional environment variables: `CONTACT_EMAIL`, `SEMANTIC_SCHOLAR_API_KEY`, `DATABASE_URL`.
 3. Deploy. Check `https://<your-app>.vercel.app/api/health`.
+
+Only `main` and `backend` contain the whole app. `vercel.json` (the same file on every branch)
+turns off Vercel builds for the `scraping` and `frontend` branches, which hold only one part of
+the app and would fail with "No FastAPI entrypoint found".
+
+**Tests on GitHub:** `.github/workflows/tests.yml` runs the offline tests on every pull request.
+The `main` ruleset requires this check ("Research Base Tests / pytest"), so changes reach `main`
+through a pull request once it passes.
 
 **The library is temporary for now.** Without a database, Vercel keeps saved papers only until
 it restarts the app, which happens often. Lookups and the Excel download work, but the library
@@ -96,14 +104,40 @@ while it retries. A free `SEMANTIC_SCHOLAR_API_KEY` makes this fast and reliable
 
 ## Quartile (SCImago file)
 
-Quartile comes from the free SCImago Journal Rank file:
+Quartile comes from the free SCImago Journal Rank file `reference/scimagojr_2025.csv`, which is in
+the repository and used automatically (also on Vercel). No setup is needed.
 
-1. Go to https://www.scimagojr.com/journalrank.php and click **Download data**.
-2. Save it as `data/scimagojr_2025.csv` (any name works).
-3. In `.env`, set `SJR_CSV_PATH=data/scimagojr_2025.csv` and restart the app.
+To update it each year: go to https://www.scimagojr.com/journalrank.php, click **Download data**,
+save it as `reference/scimagojr_<year>.csv`, delete the old file, and restart the app. The newest
+`reference/scimagojr*.csv` is always used; `SJR_CSV_PATH` overrides it. Matching is by ISSN; a journal with no ISSN in any source is matched by its exact title. The details
+page says which SCImago year and journal the quartile came from. Conference proceedings in the file usually have no quartile (shown as N/A).
 
-Download the new file each year. Conference proceedings in the file usually have no quartile
-(shown as N/A).
+## Home institution and faculty IDs (fields 25–27)
+
+- **Field 27** lists each author's institutions (OpenAlex, else the affiliation text in Crossref).
+- **Field 25** is "Shiv Nadar University, Chennai" when an author is from it: an affiliation with its
+  ROR ID (`039rg7508`), or text containing e.g. "Shiv Nadar University Chennai". SSN College of
+  Engineering (ROR `054psm803`) and "SSN School of Engineering" also count, because the sources often
+  list SNU Chennai staff under SSN. Change this with `HOME_INSTITUTION_NAME`, `HOME_INSTITUTION_ROR`
+  and `HOME_INSTITUTION_ALIASES` in `.env`.
+- **Field 26** names the teachers from **`reference/faculty.csv`** who wrote the paper, with their
+  **faculty ID** (e.g. `SNUC-F0006`). Every teacher has one fixed ID there; the same ID appears on the
+  details page, in the Excel file and in Supabase. To add a teacher, add a row with the next free ID.
+  Never change or reuse an ID.
+- Name matching accepts initials and either word order ("K.S. Gayathri", "Gayathri KS"). Spellings the
+  rules can't reach go in `name_variants` (separated by `;`). A teacher is **not** linked when every
+  source places that author at another institution, because common names are shared by different
+  people. When no source lists affiliations, a name match is used and marked "name only".
+- These fields are worked out when a paper is shown, so editing `faculty.csv` updates every paper at
+  once. Papers saved before this feature have no affiliations yet: look their DOI up again.
+
+## Supabase copy (optional)
+
+`SUPABASE_DB_URL` (Transaction pooler, port 6543) also writes every Journal/Conference paper to
+normalized tables for reports (`backend/integrations/database/supabase_schema.sql`; run it once in the
+Supabase SQL editor). The `faculty` table is filled from `reference/faculty.csv`. A Supabase problem
+never breaks a lookup; it is logged. This is separate from `DATABASE_URL`, which stores the library
+the app itself reads.
 
 ## Temporary outages
 
@@ -137,7 +171,17 @@ Science are queried only through their official APIs, when the department provid
 | 15 | Impact Factor | Clarivate JCR (licensed), from a department CSV | ⚠️ needs licensed data |
 | 16–19 | Conference Name, Acronym, Dates, Location | Crossref `event` metadata (S2/OpenAlex fallback for name/acronym) | ✅ when the publisher deposits them (IEEE/ACM usually do) |
 | 20–23 | Proceedings Title, Publisher, ISBN/ISSN, Volume/Pages | Crossref | ✅ (ISBN is often not deposited at article level) |
+| 24 | Publication Date | Crossref (earliest of online/print) → OpenAlex → S2; `YYYY-MM` when no source knows the day | ✅ |
+| 25 | Home Institution | Author affiliations (OpenAlex, Crossref) and the faculty list | ✅ |
+| 26 | Home Faculty (Faculty ID) | `reference/faculty.csv` matched against the authors | ✅ |
+| 27 | Author Affiliations | OpenAlex (institutions + ROR) → Crossref (affiliation text) | ✅ when the publisher deposits them |
 | extra | PDF link / availability | OpenAlex, Semantic Scholar (legal open-access copies only) | ✅ |
+
+**Book-series proceedings and book chapters.** Springer (LNCS, LNNS, CCIS...) and others register many
+conference papers as book chapters. They are recorded as Conference when the book title names a
+conference or OpenAlex / Semantic Scholar say so, with the book, series, ISBN, series ISSN and pages in
+fields 20-23. True book chapters use fields 20-23 for the book (title, publisher, ISBN, pages); the
+journal and conference-event fields are marked not applicable.
 
 A field that can't be retrieved is returned as `null`, with the reason in `provenance`.
 Nothing is guessed. A real `0` stays `0`. Citation counts from different sources are kept separately.
@@ -182,9 +226,13 @@ curl -X POST http://127.0.0.1:8000/api/papers -H "Content-Type: application/json
 | `SEMANTIC_SCHOLAR_API_KEY` | Reliable Semantic Scholar access (the anonymous pool is often rate limited). Free on request. |
 | `SCOPUS_API_KEY` | Field 8: Scopus indexing check (Elsevier, https://dev.elsevier.com, institutional). |
 | `WOS_API_KEY` | Field 8: Web of Science indexing check (Clarivate WoS Starter API). |
-| `SJR_CSV_PATH` | Field 14: path to the SCImago journal ranking CSV (free download from scimagojr.com → "Download data"). |
+| `SJR_CSV_PATH` | Field 14: path to the SCImago journal ranking CSV (free download from scimagojr.com → "Download data"). Default: the newest `reference/scimagojr*.csv`. |
 | `IMPACT_FACTOR_CSV_PATH` | Field 15: CSV with columns `issn,impact_factor[,year]` exported from JCR (licensed). |
 | `DATABASE_URL` | Hosted Postgres (e.g. Supabase) to keep the library permanently. Not set: SQLite file `data/research_data.db` (on Vercel: temporary, in `/tmp`). |
+| `SUPABASE_DB_URL` | Optional normalized copy for reports (see "Supabase copy"). |
+| `FACULTY_CSV_PATH` | Faculty list with IDs (default `reference/faculty.csv`). |
+| `HOME_INSTITUTION_NAME`, `HOME_INSTITUTION_ROR`, `HOME_INSTITUTION_ALIASES` | Fields 25–26: which institution counts as home (default: Shiv Nadar University, Chennai). |
+| `SOURCE_TIME_BUDGET_SECONDS` | Most time one source may take, retries included (default 40). |
 | `EXCEL_PATH` | Where a copy of the Excel file is kept locally (default `data/research_papers.xlsx`; not used on Vercel). |
 | `FRONTEND_DIR` | Folder with the pages (default `UI`). |
 | `CORS_ORIGINS` | Origins allowed to call the API (default `*` for local development). |
@@ -206,16 +254,17 @@ backend/
     semantic_scholar.py   fallback metadata, PDF, citation metrics
     indexing.py           Scopus / Web of Science official APIs (optional keys)
     journal_rankings.py   quartile (SJR file) and impact factor (JCR file) by ISSN
-    google_scholar.py     not queried (no permitted API); reports "unavailable"
   processing/
     doi_validator.py      DOI normalization / validation / de-duplication
     metric_mapper.py      the field list (numbered as in the field document)
     data_merger.py        merges sources, keeps provenance, builds the frontend JSON
+    home_institution.py   home institution + faculty matching (fields 25-27)
     retrieval.py          DOI -> standardized record (no database; used by fetch_doi.py too)
     pipeline.py           retrieval + storage, single DOI or background bulk job
   integrations/
     excel_export.py       writes data/research_papers.xlsx after every add/delete
-    google_sheets.py      spreadsheet row builder (sync not implemented yet)
+    database/             optional Supabase copy (schema, writer, record mapping)
+reference/                scimagojr_2025.csv (quartiles), faculty.csv (teachers and their IDs)
 fetch_doi.py              command-line lookup (no server needed)
 tests/                    unit, API and live tests
 API.md                    endpoint contract for the frontend
@@ -231,6 +280,6 @@ value isn't extracted yet, add one line to the relevant `services/*.py` parser. 
 .venv/bin/pytest
 ```
 
-That runs 66 tests, 6 of them against the live APIs (one journal paper, one conference paper, one
+That runs 118 tests, 6 of them against the live APIs (one journal paper, one conference paper, one
 paper in all three sources, and a DOI that doesn't exist). For offline runs use
 `.venv/bin/pytest -m "not live"`.

@@ -28,22 +28,6 @@ input#doi {
 }
 
 /* Details page */
-.field-list {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 0.6rem 1.5rem;
-    margin: 0;
-}
-
-.field-list p {
-    margin: 0;
-    color: #667085;
-}
-
-.field-list span {
-    word-break: break-word;
-}
-
 .not-available {
     color: #9aa1ad;
     font-style: italic;
@@ -72,18 +56,7 @@ footer {
     padding: 2rem 0;
 }
 
-@media (max-width: 576px) {
-    .field-list {
-        grid-template-columns: 1fr;
-        gap: 0.15rem;
-    }
-
-    .field-list span {
-        margin-bottom: 0.6rem;
-    }
-}
-
-/* Details page: all 23 fields in one numbered table */
+/* Details page: all fields in one numbered table */
 .fields-table td, .fields-table th {
     padding: 0.6rem 1rem;
     vertical-align: top;
@@ -118,4 +91,27 @@ footer {
 .fields-table .reason {
     font-size: 0.8rem;
     color: #9aa1ad;
+}
+
+.fields-table .faculty-id {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    background: #eef2f8;
+    color: #1f4e8c;
+    border-radius: 4px;
+    padding: 0.05rem 0.35rem;
+}
+
+.fields-table .affiliations li + li {
+    margin-top: 0.3rem;
+}
+
+.fields-table .affiliations .author {
+    font-weight: 600;
+}
+
+/* Library table: home-institution papers */
+.home-badge {
+    font-size: 0.7rem;
+    vertical-align: middle;
 }

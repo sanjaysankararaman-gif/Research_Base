@@ -15,5 +15,5 @@ dependencies = [
 ]
 
 [tool.vercel]
-# The app is backend/main.py. (The root main.py is an older draft and is not used.)
+# The app is backend/main.py.
 entrypoint = "backend.main:app"

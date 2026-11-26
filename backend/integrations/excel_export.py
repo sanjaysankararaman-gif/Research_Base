@@ -38,8 +38,10 @@ _lock = threading.Lock()
 NOT_AVAILABLE = "Not available"
 NOT_APPLICABLE = "-"
 
-# (column header, key in flatten()["fields"], applies-to: None = all, "Journal", "Conference")
-COLUMNS: list[tuple[str, str, str | None]] = [
+# (column header, key in flatten()["fields"], applies-to: None = all, or the types it applies to)
+J, CONF, PROC = ("Journal",), ("Conference",), ("Conference", "Book chapter", "Book")
+KNOWN_TYPES = ("Journal", "Conference", "Book chapter", "Book")
+COLUMNS: list[tuple[str, str, tuple[str, ...] | None]] = [
     # 1. Common fields
     ("Publication Title", "title", None),
     ("Publication Type", "publication_type", None),
@@ -50,29 +52,35 @@ COLUMNS: list[tuple[str, str, str | None]] = [
     ("Publication URL", "publication_url", None),
     ("Indexing Database", "indexing", None),
     # 2. Journal-specific
-    ("Journal Name", "journal", "Journal"),
-    ("ISSN / E-ISSN", "issn", "Journal"),
-    ("Volume", "volume", "Journal"),
-    ("Issue", "issue", "Journal"),
-    ("Page Range / Article Number", "page_range", "Journal"),
-    ("Quartile", "quartile", "Journal"),
-    ("Impact Factor", "impact_factor", "Journal"),
+    ("Journal Name", "journal", J),
+    ("ISSN / E-ISSN", "issn", J),
+    ("Volume", "volume", J),
+    ("Issue", "issue", J),
+    ("Page Range / Article Number", "page_range", J),
+    ("Quartile", "quartile", J),
+    ("Impact Factor", "impact_factor", J),
     # 3. Conference-specific
-    ("Conference Name", "conference_name", "Conference"),
-    ("Conference Acronym", "conference_acronym", "Conference"),
-    ("Conference Dates", "conference_dates", "Conference"),
-    ("Conference Location", "conference_location", "Conference"),
-    ("Proceedings Title", "proceedings_title", "Conference"),
-    ("Proceedings Publisher", "proceedings_publisher", "Conference"),
-    ("Proceedings ISBN / ISSN", "proceedings_isbn_issn", "Conference"),
-    ("Proceedings Volume / Page Range", "proceedings_volume_pages", "Conference"),
+    ("Conference Name", "conference_name", CONF),
+    ("Conference Acronym", "conference_acronym", CONF),
+    ("Conference Dates", "conference_dates", CONF),
+    ("Conference Location", "conference_location", CONF),
+    ("Proceedings Title", "proceedings_title", PROC),
+    ("Proceedings Publisher", "proceedings_publisher", PROC),
+    ("Proceedings ISBN / ISSN", "proceedings_isbn_issn", PROC),
+    ("Proceedings Volume / Page Range", "proceedings_volume_pages", PROC),
+    # 4. Date and institution
+    ("Publication Date", "publication_date", None),
+    ("Home Institution", "home_institution", None),
+    ("Home Faculty (Faculty ID)", "home_faculty_text", None),
+    ("Author Affiliations", "author_affiliations_text", None),
     # Extra
     ("Published Version DOI", "published_doi", None),
     ("PDF Link", "pdf_url", None),
     ("Notes", "version_note", None),
 ]
 
-WIDTHS = {"Publication Title": 50, "Author Names": 40, "Publication URL": 40, "Indexing Database": 36,
+WIDTHS = {"Publication Title": 50, "Author Names": 40, "Home Institution": 26,
+          "Home Faculty (Faculty ID)": 36, "Author Affiliations": 60, "Publication URL": 40, "Indexing Database": 36,
           "Journal Name": 30, "Conference Name": 40, "Proceedings Title": 45, "PDF Link": 40,
           "Notes": 60, "Published Version DOI": 26}
 
@@ -81,12 +89,14 @@ def excel_path() -> Path | None:
     return settings.excel_path
 
 
-def _cell(fields: dict[str, Any], key: str, applies_to: str | None) -> Any:
+def _cell(fields: dict[str, Any], key: str, applies_to: tuple[str, ...] | None) -> Any:
     ptype = fields.get("publication_type")
-    if applies_to and ptype in ("Journal", "Conference") and ptype != applies_to:
+    if applies_to and ptype in KNOWN_TYPES and ptype not in applies_to:
         return NOT_APPLICABLE
     value = fields.get(key)
     if value is None or value == "" or value == []:
+        if key in ("home_institution", "home_faculty_text") and fields.get("institutions_checked"):
+            return "No"          # checked: no author is from the home institution
         return "" if key in ("version_note", "published_doi") else NOT_AVAILABLE
     return value
 

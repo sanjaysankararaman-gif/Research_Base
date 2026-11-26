@@ -66,13 +66,19 @@ COLUMNS: list[tuple[str, str, str | None]] = [
     ("Proceedings Publisher", "proceedings_publisher", "Conference"),
     ("Proceedings ISBN / ISSN", "proceedings_isbn_issn", "Conference"),
     ("Proceedings Volume / Page Range", "proceedings_volume_pages", "Conference"),
+    # 4. Date and institution
+    ("Publication Date", "publication_date", None),
+    ("Home Institution", "home_institution", None),
+    ("Home Faculty (Faculty ID)", "home_faculty_text", None),
+    ("Author Affiliations", "author_affiliations_text", None),
     # Extra
     ("Published Version DOI", "published_doi", None),
     ("PDF Link", "pdf_url", None),
     ("Notes", "version_note", None),
 ]
 
-WIDTHS = {"Publication Title": 50, "Author Names": 40, "Publication URL": 40, "Indexing Database": 36,
+WIDTHS = {"Publication Title": 50, "Author Names": 40, "Home Institution": 26,
+          "Home Faculty (Faculty ID)": 36, "Author Affiliations": 60, "Publication URL": 40, "Indexing Database": 36,
           "Journal Name": 30, "Conference Name": 40, "Proceedings Title": 45, "PDF Link": 40,
           "Notes": 60, "Published Version DOI": 26}
 
@@ -87,6 +93,8 @@ def _cell(fields: dict[str, Any], key: str, applies_to: str | None) -> Any:
         return NOT_APPLICABLE
     value = fields.get(key)
     if value is None or value == "" or value == []:
+        if key in ("home_institution", "home_faculty_text") and fields.get("institutions_checked"):
+            return "No"          # checked: no author is from the home institution
         return "" if key in ("version_note", "published_doi") else NOT_AVAILABLE
     return value
 

@@ -107,7 +107,17 @@ Element IDs in `details.html` → JSON keys in `data.fields`:
 | `proceedings-publisher` | `proceedings_publisher` | 21 |
 | `proceedings-isbn` | `proceedings_isbn_issn` | 22 |
 | `proceedings-volume-pages` | `proceedings_volume_pages` | 23 |
+| `publication-date` | `publication_date`: `"YYYY-MM-DD"`, or `"YYYY-MM"` when no source knows the day | 24 |
+| `home-institution` | `home_institution`: e.g. `"Shiv Nadar University, Chennai"`, or `null` when no author is from it | 25 |
+| `home-faculty` | `home_faculty`: `[{faculty_id, name, author, position, evidence}]` (text: `home_faculty_text`) | 26 |
+| `author-affiliations` | `author_affiliations`: `[{author, institutions, is_home}]` in author order (text: `author_affiliations_text`) | 27 |
 | `pdf-status` / `pdf-link` | `pdf_available` (`true` / `false` / `null` = unknown), `pdf_url` | (extra) |
+
+Also: `quartile_detail` (which SCImago year and journal the quartile came from), `home_authors`
+(authors placed at the home institution by their affiliation, on the faculty list or not) and
+`institutions_checked` (`false` only for papers saved before fields 24-27 existed; look them up again).
+For fields 25-26, `null` with `institutions_checked: true` means "No", and
+`provenance.home_institution.reason` / `provenance.home_faculty.reason` say why.
 
 Conditional display: show `#journal-info` when `publication_type === "Journal"`, and
 `#conference-info` + `#proceedings-info` when it is `"Conference"`.

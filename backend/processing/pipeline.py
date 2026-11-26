@@ -1,7 +1,7 @@
 """Extraction pipeline: runs a job in the background.
 
 For each DOI in a job, all sources are queried concurrently. Job progress
-(per DOI and per source) is written to SQLite as each source finishes, so
+(per DOI and per source) is written to the database as each source finishes, so
 GET /status/{job_id} reflects live progress. A limited number of DOIs are
 processed at the same time (DOI_CONCURRENCY) to respect source rate limits.
 """
@@ -12,9 +12,9 @@ import logging
 
 from .. import database as db
 from ..config import settings
+from ..integrations.database.supabase_sync import sync_to_supabase
 from ..services import OK, SourceClient, SourceResult
 from .retrieval import retrieve
-from ..integrations.database.supabase_sync import sync_to_supabase
 
 log = logging.getLogger("extractor.pipeline")
 

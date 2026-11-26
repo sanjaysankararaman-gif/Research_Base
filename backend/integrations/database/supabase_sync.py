@@ -6,11 +6,11 @@ sync_to_supabase() is the entry point used by the pipeline. It never raises.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Any
 
-from ...processing.data_merger import flatten 
+from ...config import settings
+from ...processing.data_merger import flatten
 from .supabase_db import Publication, UnsupportedPublicationType, save_publication
 
 log = logging.getLogger("extractor.supabase_sync")
@@ -25,18 +25,18 @@ INDEX_NAMES = {"crossref": "Crossref", "pubmed": "PubMed", "doaj": "DOAJ",
                "arxiv": "arXiv", "datacite": "DataCite"}
 
 
-def _metric(record: dict[str, Any], key: str) -> Any:
-    pref = record.get("metrics", {}).get(key, {}).get("preferred")
-    return pref["value"] if pref else None
-
-
 def _text(value: Any) -> str | None:
     return None if value is None or value == "" else str(value)
 
 
 def _issn_parts(record: dict[str, Any]) -> tuple[str | None, str | None]:
-    """Print and electronic ISSN, collected from every source that supplied one."""
-    print_issn = electronic = None
+    """Print and electronic ISSN, collected from every source that supplied one.
+
+    Values labelled "(ISSN)" / "(E-ISSN)" (Crossref) decide first. Unlabelled codes
+    (OpenAlex) only fill a gap, and one code is never stored as both.
+    """
+    labelled: dict[str, str] = {}
+    unlabelled: list[str] = []
     for v in record.get("metrics", {}).get("issn", {}).get("values", []):
         if not v["available"]:
             continue
@@ -46,11 +46,19 @@ def _issn_parts(record: dict[str, Any]) -> tuple[str | None, str | None]:
                 continue
             code = match.group(0).upper()
             if "E-ISSN" in part.upper():
-                electronic = electronic or code
-            elif print_issn is None:
-                print_issn = code
-            elif electronic is None and code != print_issn:
-                electronic = code
+                labelled.setdefault("electronic", code)
+            elif "(ISSN)" in part.upper():
+                labelled.setdefault("print", code)
+            elif code not in unlabelled:
+                unlabelled.append(code)
+    print_issn, electronic = labelled.get("print"), labelled.get("electronic")
+    for code in unlabelled:
+        if code in (print_issn, electronic):
+            continue
+        if print_issn is None:
+            print_issn = code
+        elif electronic is None:
+            electronic = code
     return print_issn, electronic
 
 
@@ -94,10 +102,12 @@ def publication_from_record(record: dict[str, Any]) -> Publication:
         publication_type=ptype,
         authors=fields["authors"] or [],
         publication_year=fields["publication_year"],
-        publication_date=_metric(record, "publication_date"),
+        publication_date=fields["publication_date"],
         publisher=fields["publisher"],
         publication_url=fields["publication_url"],
         indexing_database=_indexing(fields["indexing_detail"]),
+        home_institution=fields["home_institution"],
+        faculty=fields["home_faculty"],
     )
 
     if ptype == "Journal":
@@ -112,7 +122,7 @@ def publication_from_record(record: dict[str, Any]) -> Publication:
             "issue": _text(fields["issue"]),
             "page_range": _text(fields["page_range"]),
             "quartile": fields["quartile"] if fields["quartile"] in QUARTILES else None,
-            "impact_factor": fields["impact_factor"] if (fields["impact_factor"] or 0) < 1000 else None
+            "impact_factor": fields["impact_factor"] if (fields["impact_factor"] or 0) < 1000 else None,
         }
         return Publication(**base, journal=journal)
 
@@ -142,7 +152,7 @@ def sync_to_supabase(record: dict[str, Any]) -> None:
 
     Never raises. A Supabase problem must not break a DOI lookup, so the reason is logged.
     """
-    if not os.getenv("SUPABASE_DB_URL"):
+    if not settings.supabase_db_url:
         return
     try:
         publication = publication_from_record(record)

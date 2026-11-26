@@ -1,4 +1,4 @@
-"""API (/api), storage, frontend contract and Google Sheets mapping, with simulated sources."""
+"""API (/api), storage, frontend contract and Excel file, with simulated sources."""
 import time
 
 import httpx
@@ -6,7 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import database as db
-from backend.integrations.google_sheets import GoogleSheetsNotConfigured, GoogleSheetsSync, build_header, record_to_row
 from backend.main import app
 from backend.services import build_clients
 
@@ -66,6 +65,15 @@ def test_add_paper_returns_flat_fields(client):
     assert f["citation_counts"] == {"crossref": 0, "openalex": 7, "semantic_scholar": None}
     assert p["provenance"]["title"]["source"] == "crossref"
     assert "SJR_CSV_PATH" in p["provenance"]["quartile"]["reason"]
+    # 24-27: date and institution. Ada is on the faculty list, but every source places her at
+    # Analytical College, so she is not linked. Alan has no affiliation anywhere: name only.
+    assert f["publication_date"] == "2020-05-17"
+    assert f["home_institution"] == "Shiv Nadar University, Chennai"
+    assert f["home_faculty"] == [{"faculty_id": "SNUC-F0002", "name": "Alan Turing", "author": "Alan Turing",
+                                  "position": 2, "evidence": "name only (no affiliation in the sources)"}]
+    assert f["home_faculty_text"] == "Alan Turing (SNUC-F0002)"
+    assert f["author_affiliations_text"] == "Ada Lovelace: Analytical College"
+    assert p["provenance"]["home_institution"]["source"] == "openalex"
 
     # Details page lookup by id, and repeat add returns the stored paper.
     assert client.get(f"/api/papers/{p['id']}").json()["fields"]["title"] == "A Test Paper"
@@ -167,20 +175,6 @@ def test_cors_allows_frontend_origin(client):
     assert r.status_code == 200 and r.headers.get("access-control-allow-origin") in ("*", "http://127.0.0.1:5500")
 
 
-def test_google_sheets_row_mapping(client):
-    client.post("/api/papers", json={"doi": DOI})
-    rec = db.get_paper(DOI)
-    header, row = build_header(), record_to_row(rec)
-    assert len(header) == len(row)
-    cells = dict(zip(header, row))
-    assert cells["DOI"] == DOI
-    assert cells["Publication Title"] == "A Test Paper" and cells["Publication Title Source"] == "Crossref"
-    assert cells["Author Names"] == "Ada Lovelace; Alan Turing"
-    assert cells["Quartile"] == ""                     # unavailable -> blank cell
-    with pytest.raises(GoogleSheetsNotConfigured):
-        GoogleSheetsSync().append_records([rec])
-
-
 def test_excel_file_is_written_and_kept_in_sync(client):
     from openpyxl import load_workbook
     from backend.integrations.excel_export import excel_path
@@ -201,6 +195,9 @@ def test_excel_file_is_written_and_kept_in_sync(client):
     assert journal["Volume"] == "12" and journal["Quartile"] == "Not available"
     assert journal["Conference Name"] == "-"                       # not applicable to a journal paper
     assert conference["Conference Location"] == "Chennai, India" and conference["Journal Name"] == "-"
+    assert journal["Publication Date"] == "2020-05-17" and conference["Publication Date"] == "2019-08-04"
+    assert journal["Home Faculty (Faculty ID)"] == "Alan Turing (SNUC-F0002)"
+    assert conference["Home Institution"] == "No" and conference["Home Faculty (Faculty ID)"] == "No"
 
     # Deleting from the library removes the Excel row; the download endpoint serves the file.
     client.delete(f"/api/papers/{a['id']}")
@@ -245,3 +242,29 @@ def test_bulk_job_never_left_running(client, monkeypatch):
     job = client.post("/api/extract", json={"doi": DOI}).json()["job_id"]
     item = wait_for(client, job)["items"][0]
     assert item["status"] == "failed"
+
+
+def test_library_rows_show_date_and_home_faculty(client):
+    client.post("/api/papers", json={"doi": DOI})
+    row = client.get("/api/papers").json()["items"][0]
+    assert row["publication_date"] == "2020-05-17"
+    assert row["home_institution"] == "Shiv Nadar University, Chennai"
+    assert row["home_faculty"] == [{"faculty_id": "SNUC-F0002", "name": "Alan Turing"}]
+
+
+def test_health_reports_faculty_list(client):
+    h = client.get("/api/health").json()
+    assert h["home_institution"] == "Shiv Nadar University, Chennai"
+    assert h["faculty"] == {"count": 3, "file": "faculty.csv", "error": None}
+    assert h["supabase_copy"].startswith("not configured")
+
+
+def test_repeat_lookup_of_same_doi_fetches_again(client):
+    """Entering the same DOI again always re-queries the sources and returns the same paper."""
+    first = client.post("/api/papers", json={"doi": DOI, "refresh": True})
+    second = client.post("/api/papers", json={"doi": DOI.upper(), "refresh": True})
+    third = client.post("/api/papers", json={"doi": f"doi:{DOI}", "refresh": True})
+    assert first.status_code == 201 and second.status_code == 200 and third.status_code == 200
+    assert first.json()["id"] == second.json()["id"] == third.json()["id"]
+    assert second.json()["already_in_library"] is True and "warning" not in second.json()
+    assert second.json()["fields"]["title"] == "A Test Paper"

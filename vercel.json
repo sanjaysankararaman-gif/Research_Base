@@ -1,9 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "scraping": false,
+      "frontend": false
+    }
+  },
   "functions": {
     "backend/main.py": {
       "maxDuration": 120,
-      "excludeFiles": "{tests/**,data/**,logs/**,.venv/**,**/__pycache__/**}"
+      "excludeFiles": "{tests/**,data/**,logs/**,.venv/**,.github/**,**/__pycache__/**}"
     }
   }
 }

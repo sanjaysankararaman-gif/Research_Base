@@ -55,10 +55,18 @@ git add UI/details.html && git commit --no-edit
 ## Deploying on Vercel
 
 1. vercel.com → **Add New… → Project** → import `Research_Base` (branch `main`). Vercel
-   detects FastAPI. `pyproject.toml` tells it to run `backend/main.py`, so the older root
-   `main.py` is not used.
-2. Optional environment variables: `CONTACT_EMAIL`, `SEMANTIC_SCHOLAR_API_KEY`.
+   detects FastAPI. `pyproject.toml` (`[tool.vercel] entrypoint = "backend.main:app"`)
+   tells it to run `backend/main.py`.
+2. Optional environment variables: `CONTACT_EMAIL`, `SEMANTIC_SCHOLAR_API_KEY`, `DATABASE_URL`.
 3. Deploy. Check `https://<your-app>.vercel.app/api/health`.
+
+Only `main` and `backend` contain the whole app. `vercel.json` (the same file on every branch)
+turns off Vercel builds for the `scraping` and `frontend` branches, which hold only one part of
+the app and would fail with "No FastAPI entrypoint found".
+
+**Tests on GitHub:** `.github/workflows/tests.yml` runs the offline tests on every pull request.
+The `main` ruleset requires this check ("Research Base Tests / pytest"), so changes reach `main`
+through a pull request once it passes.
 
 **The library is temporary for now.** Without a database, Vercel keeps saved papers only until
 it restarts the app, which happens often. Lookups and the Excel download work, but the library
